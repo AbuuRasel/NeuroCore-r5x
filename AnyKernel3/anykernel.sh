@@ -40,14 +40,14 @@ PATCH_VBMETA_FLAG=auto;
 # NeuroCore details (big banner art lives in the top-level 'banner'
 # file, printed first by update-binary before any checks)
 ui_print " ";
-ui_print "==============================================================";
+ui_print "================================================";
 ui_print "Device : Realme 5 Series";
 ui_print "BY     : AbuuRaseL";
 ui_print "Tele.  : t.me/@AbuuRaseL";
 ui_print "KSU-N  : v3.3.0";
 ui_print "SUSFS  : v2.2.0";
 ui_print "Linux  : v4.14.357-openela";
-ui_print "==============================================================";
+ui_print "================================================";
 ui_print " ";
 
 # boot install
