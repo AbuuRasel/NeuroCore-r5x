@@ -53,23 +53,6 @@ ui_print "Linux  : v4.14.357-openela";
 ui_print "================================================";
 ui_print " ";
 
-# NeuroCore pre-flight: recovery RAM (/tmp) space check. Flashing a ROM
-# and the kernel back-to-back in one recovery session can exhaust tmpfs,
-# which later fails with a confusing ramdisk error. Refuse early with a
-# clear message instead. A failed check never blocks normal flashes.
-tmp_free_kb=$(df -k /tmp 2>/dev/null | tail -n 1 | awk '{print $4}');
-case "$tmp_free_kb" in
-  ''|*[!0-9]*)
-    ui_print "Warning: could not check /tmp free space, continuing...";
-    ;;
-  *)
-    ui_print "/tmp free: $((tmp_free_kb / 1024)) MB";
-    if [ "$tmp_free_kb" -lt 307200 ]; then
-      abort "Not enough free recovery RAM (/tmp). Reboot recovery and flash the kernel alone.";
-    fi
-    ;;
-esac;
-
 # boot install
 dump_boot;
 
