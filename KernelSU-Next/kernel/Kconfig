@@ -1,0 +1,126 @@
+menu "KernelSU"
+
+config KSU
+	tristate "KernelSU function support"
+	depends on KPROBES && EXT4_FS
+	default y
+	help
+	  Enable kernel-level root privileges on Android System.
+	  Requires CONFIG_KPROBES for kernel hooking support.
+	  Requires CONFIG_EXT4_FS for `ext4_unregister_sysfs`.
+	  To compile as a module, choose M here: the
+	  module will be called kernelsu.
+
+config KSU_DEBUG
+	bool "KernelSU debug mode"
+	depends on KSU
+	default n
+	help
+	  Enable KernelSU debug mode.
+
+config KSU_DISABLE_MANAGER
+	bool "Disable KernelSU manager integration"
+	depends on KSU
+	default n
+	help
+	  Disable manager APK detection and manager-specific handling.
+	  Root will be used in place of manager-only functionality.
+
+config KSU_DISABLE_POLICY
+	bool "Disable KernelSU policy profiles"
+	depends on KSU
+	default n
+	help
+	  Disable per-app root/non-root profile customization.
+	  Escalation will always use the default full root profile, and
+	  non-root handling will follow the global umount policy only.
+
+
+config KSU_DISABLE_THRONE_TRACKER
+	bool "Disable throne tracker (debug)"
+	depends on KSU
+	default n
+	help
+	  Disable manager appid tracking scans.
+
+config KSU_DISABLE_PRUNE
+	bool "Disable allowlist prune (debug)"
+	depends on KSU
+	default n
+
+config KSU_MANUAL_HOOK
+	bool "KernelSU manual hook mode (4.14 backport)"
+	depends on KSU && KSU != m
+	default y
+	help
+	  Enable manual hook support for kernels without modern syscall symbols.
+
+
+menu "KernelSU - SUSFS"
+config KSU_SUSFS
+	bool "KernelSU addon - SUSFS"
+	depends on KSU
+	default y
+config KSU_SUSFS_SUS_PATH
+	bool "Enable to hide suspicious path"
+	depends on KSU_SUSFS
+	default y
+config KSU_SUSFS_SUS_MOUNT
+	bool "Enable to hide suspicious mounts"
+	depends on KSU_SUSFS
+	default y
+config KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+	bool "Enable auto-add sus bind mounts"
+	depends on KSU_SUSFS && KSU_SUSFS_SUS_MOUNT
+	default y
+config KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+	bool "Enable auto-add sus ksu default mounts"
+	depends on KSU_SUSFS && KSU_SUSFS_SUS_MOUNT
+	default y
+config KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
+	bool "Enable auto-add try-umount for bind mounts"
+	depends on KSU_SUSFS && KSU_SUSFS_SUS_MOUNT
+	default y
+config KSU_SUSFS_SUS_KSTAT
+	bool "Enable to spoof suspicious kstat"
+	depends on KSU_SUSFS
+	default y
+config KSU_SUSFS_SUS_MAP
+	bool "Enable to spoof map vma"
+	depends on KSU_SUSFS
+	default y
+config KSU_SUSFS_SUS_MEMFD
+	bool "Enable memfd hiding"
+	depends on KSU_SUSFS
+	default y
+config KSU_SUSFS_SPOOF_UNAME
+	bool "Enable to spoof uname"
+	depends on KSU_SUSFS
+	default y
+config KSU_SUSFS_ENABLE_LOG
+	bool "Enable SUSFS log"
+	depends on KSU_SUSFS
+	default n
+config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+	bool "Hide KSU/SUSFS symbols"
+	depends on KSU_SUSFS
+	default y
+config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+	bool "Enable to spoof cmdline or bootconfig"
+	depends on KSU_SUSFS
+	default y
+config KSU_SUSFS_OPEN_REDIRECT
+	bool "Enable open redirect"
+	depends on KSU_SUSFS
+	default y
+config KSU_SUSFS_TRY_UMOUNT
+	bool "Enable try-umount"
+	depends on KSU_SUSFS
+	default y
+config KSU_SUSFS_SUS_SU
+	bool "Enable SUS-SU mode"
+	depends on KSU_SUSFS
+	default n
+endmenu
+
+endmenu
