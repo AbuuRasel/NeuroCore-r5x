@@ -15,7 +15,10 @@ device.name2=RMX1912
 device.name3=RMX1913
 device.name4=RMX1925
 device.name5=RMX2030
-supported.versions=
+device.name6=RMX1919
+device.name7=realme_trinket
+device.name8=r5x
+supported.versions=10-13
 supported.patchlevels=
 supported.vendorpatchlevels=
 '; } # end properties
