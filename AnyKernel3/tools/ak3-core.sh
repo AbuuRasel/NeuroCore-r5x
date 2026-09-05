@@ -227,7 +227,16 @@ unpack_ramdisk() {
       unpack_vendorrd $cpio;
     done;
   else
-    abort "No ramdisk found to unpack. Aborting...";
+    # NeuroCore: ramdiskless boot image (e.g. SAR ROMs with RAMDISK_SZ 0).
+    # Only continue when the original image genuinely has no ramdisk;
+    # otherwise keep the old abort for real unpack failures.
+    rsz=$(grep RAMDISK_SZ $SPLITIMG/infotmp 2>/dev/null | sed -n 's;.*\[\(.*\)\];\1;p');
+    if [ "$rsz" = "0" ]; then
+      ui_print " " "No ramdisk in boot image (ramdiskless), continuing...";
+      RAMDISK_NONE=1;
+    else
+      abort "No ramdisk found to unpack. Aborting...";
+    fi;
   fi;
 }
 
@@ -242,6 +251,11 @@ dump_boot() {
 # repack_ramdisk (repack all ramdisks only)
 repack_ramdisk() {
   local comp packfail vndrname cpio mtktype;
+
+  # NeuroCore: nothing to repack on ramdiskless images
+  if [ "$RAMDISK_NONE" ]; then
+    return 0;
+  fi;
 
   cd $AKHOME;
   if [ "$RAMDISK_COMPRESSION" != "auto" ] && [ "$(grep HEADER_VER $SPLITIMG/infotmp | sed -n 's;.*\[\(.*\)\];\1;p')" -gt 3 ]; then
@@ -395,6 +409,9 @@ flash_boot() {
     done;
     case $kernel in
       *Image*)
+        # NeuroCore: ramdiskless image, skip magisk cpio probing
+        # (no ramdisk to test, magisk handling is ramdisk based)
+        if [ "$RAMDISK_NONE" ]; then magisk_patched=0; fi;
         if [ ! "$magisk_patched" -a ! "$NO_MAGISK_CHECK" ]; then
           magiskboot cpio ramdisk.cpio test;
           magisk_patched=$?;
