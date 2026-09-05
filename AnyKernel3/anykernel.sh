@@ -37,13 +37,9 @@ PATCH_VBMETA_FLAG=auto;
 # import functions/variables and setup patching - see for reference (DO NOT REMOVE)
 . tools/ak3-core.sh;
 
-# NeuroCore banner
+# NeuroCore details (big banner art lives in the top-level 'banner'
+# file, printed first by update-binary before any checks)
 ui_print " ";
-ui_print "  _   _    _____    _   _    ____      ___      ____     ___     ____     _____";
-ui_print " | \ | |  | ____|  | | | |  |  _ \    / _ \    / ___|   / _ \   |  _ \   | ____|";
-ui_print " |  \| |  |  _|    | | | |  | |_) |  | | | |  | |      | | | |  | |_) |  |  _|";
-ui_print " | |\  |  | |___   | |_| |  |  _ <   | |_| |  | |___   | |_| |  |  _ <   | |___";
-ui_print " |_| \_|  |_____|   \___/   |_| \_\   \___/    \____|   \___/   |_| \_\  |_____|";
 ui_print "==============================================================";
 ui_print "Device : Realme 5 Series";
 ui_print "BY     : AbuuRaseL";
