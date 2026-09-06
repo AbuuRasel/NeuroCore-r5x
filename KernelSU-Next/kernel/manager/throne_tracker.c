@@ -354,8 +354,21 @@ void track_throne(bool prune_only)
 						break;
 					}
 				}
-				if (manager_exist)
-					break;
+			if (manager_exist)
+				break;
+			}
+		}
+		/* NeuroCore: revive APK signature scan (v3.2.0 behavior) as a
+		 * fallback so spoof builds with random package names are
+		 * crowned as long as their APK signature matches. Runs only
+		 * when the fixed names above didn't match, so normal setups
+		 * behave exactly as before. */
+		if (!manager_exist) {
+			pr_info("Searching manager by APK signature...\n");
+			search_manager("/data/app", 2, &uid_list);
+			if (ksu_is_manager_appid_valid()) {
+				pr_info("Manager crowned by signature scan\n");
+				manager_exist = true;
 			}
 		}
 		pr_info("Search manager finished\n");
