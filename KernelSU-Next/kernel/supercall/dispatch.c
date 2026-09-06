@@ -835,6 +835,59 @@ static int do_disable_escape_to_root(void __user *arg)
     return 0;
 }
 
+/* NeuroCore max-hiding: info-disclosing ioctls must mimic absence
+ * (-ENOSYS) instead of -EPERM for untrusted callers. A forensic probe
+ * can otherwise tell "present but denied" apart from "not present".
+ * Manager/root callers are unaffected (they pass the check). */
+static int hidden_do_get_info(void __user *arg)
+{
+    if (!manager_or_root())
+        return -ENOSYS;
+    return do_get_info(arg);
+}
+
+static int hidden_do_get_info_legacy(void __user *arg)
+{
+    if (!manager_or_root())
+        return -ENOSYS;
+    return do_get_info_legacy(arg);
+}
+
+static int hidden_do_get_hook_mode(void __user *arg)
+{
+    if (!manager_or_root())
+        return -ENOSYS;
+    return do_get_hook_mode(arg);
+}
+
+static int hidden_do_get_version_tag(void __user *arg)
+{
+    if (!manager_or_root())
+        return -ENOSYS;
+    return do_get_version_tag(arg);
+}
+
+static int hidden_do_get_feature(void __user *arg)
+{
+    if (!manager_or_root())
+        return -ENOSYS;
+    return do_get_feature(arg);
+}
+
+static int hidden_do_set_feature(void __user *arg)
+{
+    if (!manager_or_root())
+        return -ENOSYS;
+    return do_set_feature(arg);
+}
+
+static int hidden_do_get_manager_appid(void __user *arg)
+{
+    if (!manager_or_root())
+        return -ENOSYS;
+    return do_get_manager_appid(arg);
+}
+
 // IOCTL handlers mapping table
 // clang-format off
 static const struct ksu_ioctl_cmd_map ksu_ioctl_handlers[] = {
@@ -851,14 +904,14 @@ static const struct ksu_ioctl_cmd_map ksu_ioctl_handlers[] = {
          * the manager keeps working after boot/package events. */
         .cmd = KSU_IOCTL_GET_INFO,
         .name = "GET_INFO",
-        .handler = do_get_info,
-        .perm_check = manager_or_root
+        .handler = hidden_do_get_info,
+        .perm_check = NULL
     },
     {
         .cmd = KSU_IOCTL_GET_INFO_LEGACY,
         .name = "GET_INFO_LEGACY",
-        .handler = do_get_info_legacy,
-        .perm_check = manager_or_root
+        .handler = hidden_do_get_info_legacy,
+        .perm_check = NULL
     },
     {
         .cmd = KSU_IOCTL_REPORT_EVENT,
@@ -917,8 +970,8 @@ static const struct ksu_ioctl_cmd_map ksu_ioctl_handlers[] = {
     {
         .cmd = KSU_IOCTL_GET_MANAGER_APPID,
         .name = "GET_MANAGER_APPID",
-        .handler = do_get_manager_appid,
-        .perm_check = manager_or_root
+        .handler = hidden_do_get_manager_appid,
+        .perm_check = NULL
     },
     {
         .cmd = KSU_IOCTL_GET_APP_PROFILE,
@@ -935,14 +988,14 @@ static const struct ksu_ioctl_cmd_map ksu_ioctl_handlers[] = {
     {
         .cmd = KSU_IOCTL_GET_FEATURE,
         .name = "GET_FEATURE",
-        .handler = do_get_feature,
-        .perm_check = manager_or_root
+        .handler = hidden_do_get_feature,
+        .perm_check = NULL
     },
     {
         .cmd = KSU_IOCTL_SET_FEATURE,
         .name = "SET_FEATURE",
-        .handler = do_set_feature,
-        .perm_check = manager_or_root
+        .handler = hidden_do_set_feature,
+        .perm_check = NULL
     },
     {
         .cmd = KSU_IOCTL_GET_WRAPPER_FD,
@@ -989,14 +1042,14 @@ static const struct ksu_ioctl_cmd_map ksu_ioctl_handlers[] = {
     {
         .cmd = KSU_IOCTL_GET_HOOK_MODE,
         .name = "GET_HOOK_MODE",
-        .handler = do_get_hook_mode,
-        .perm_check = manager_or_root
+        .handler = hidden_do_get_hook_mode,
+        .perm_check = NULL
     },
     {
         .cmd = KSU_IOCTL_GET_VERSION_TAG,
         .name = "GET_VERSION_TAG",
-        .handler = do_get_version_tag,
-        .perm_check = manager_or_root
+        .handler = hidden_do_get_version_tag,
+        .perm_check = NULL
     },
     {
         .cmd = 0,
