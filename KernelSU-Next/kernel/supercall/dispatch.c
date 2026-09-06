@@ -845,16 +845,20 @@ static const struct ksu_ioctl_cmd_map ksu_ioctl_handlers[] = {
         .perm_check = allowed_for_su
     },
     {
+        /* NeuroCore max-hiding: GET_INFO/LEGACY previously answered any
+         * caller, making KSU presence trivially probeable. Gate to
+         * manager/root; crowning is independent (packages.list scan), so
+         * the manager keeps working after boot/package events. */
         .cmd = KSU_IOCTL_GET_INFO,
         .name = "GET_INFO",
         .handler = do_get_info,
-        .perm_check = always_allow
+        .perm_check = manager_or_root
     },
     {
         .cmd = KSU_IOCTL_GET_INFO_LEGACY,
         .name = "GET_INFO_LEGACY",
         .handler = do_get_info_legacy,
-        .perm_check = always_allow
+        .perm_check = manager_or_root
     },
     {
         .cmd = KSU_IOCTL_REPORT_EVENT,
