@@ -1136,20 +1136,935 @@ allow:
 }
 #endif
 #else
-/* 4.14: selinux_hide needs 5.x AVC/policydb APIs, stubbed */
-void ksu_selinux_hide_init(void)
+/* 4.14 selinux_hide backport (NeuroCore 357).
+ *
+ * 5.x design: snapshot pristine policy before first KSU rule, then answer
+ * untrusted-app (uid >= 10000) selinuxfs queries from the backup.
+ * 4.14 gaps: no struct selinux_state/selinux_policy, global
+ * `struct policydb policydb`, static sidtab/policy_rwlock, static
+ * selinuxfs write_op, avtab/flex_array layout differences.
+ *
+ * Strategy (no full policydb dup):
+ * - Snapshot te_avtab + te_cond_avtab + permissive_map + p_types/roles/users
+ *   nprim + policyvers/allow_unknown under stop_machine exclusion.
+ * - KSU only appends new types (ksu/ksu_file) and adds AVTAB/permissive
+ *   entries, so old-type lookups via live symtabs + bounds check against
+ *   backup nprims give pristine results; AV evaluation uses backup AVTABs.
+ */
+#include "ss/avtab.h"
+#include "ss/ebitmap.h"
+#include "ss/services.h"
+#include "ss/conditional.h"
+#include "ss/constraint.h"
+#include "ss/context.h"
+#include "ss/mls.h"
+#include "ss/sidtab.h"
+#include "ss/symtab.h"
+#include "ss/hashtab.h"
+#include <linux/flex_array.h>
+#include "flask.h"
+#include "avc.h"
+#include "avc_ss.h"
+#include "security.h"
+#include "objsec.h"
+#include "klog.h"
+#include "ksu.h"
+#include "policy/feature.h"
+#include "hook/lsm_hook.h"
+#include "hook/patch_memory.h"
+
+extern struct policydb policydb;
+/* Direct link (same vmlinux) — no kallsyms needed on 4.14 with KALLSYMS_ALL=n */
+extern ssize_t (*write_op[])(struct file *, char *, size_t);
+extern struct file_operations sel_handle_status_ops;
+
+static DEFINE_MUTEX(ksu_hide414_mutex);
+static bool ksu_hide414_enabled __read_mostly = false;
+static bool ksu_hide414_running __read_mostly = false;
+
+struct ksu_hide414_backup {
+	bool valid;
+	struct avtab te_avtab;
+	struct avtab te_cond_avtab;
+	struct ebitmap permissive_map;
+	u32 p_types_nprim;
+	u32 p_roles_nprim;
+	u32 p_users_nprim;
+	unsigned int policyvers;
+	int allow_unknown;
+};
+
+static struct ksu_hide414_backup ksu_hide414_backup;
+
+static int ksu_hide414_copy_avtab(struct avtab *dst,
+				  const struct avtab *src)
 {
+	int i, ret;
+	struct avtab_node *n, *p;
+
+	ret = avtab_alloc(dst, src->nel ? src->nel : 1);
+	if (ret)
+		return ret;
+	dst->nel = 0;
+
+	if (!src->htable || !src->nslot)
+		return 0;
+
+	for (i = 0; i < (int)src->nslot; i++) {
+		n = flex_array_get_ptr(src->htable, i);
+		while (n) {
+			/* avtab_insert_node deep-copies xperms internally */
+			p = avtab_insert_nonunique(dst, &n->key, &n->datum);
+			if (!p) {
+				ret = -ENOMEM;
+				goto out_free;
+			}
+			n = n->next;
+		}
+	}
+	return 0;
+
+out_free:
+	avtab_destroy(dst);
+	return ret;
 }
-void ksu_selinux_hide_exit(void)
+
+static void ksu_hide414_free_backup_locked(void)
 {
+	if (!ksu_hide414_backup.valid)
+		return;
+	avtab_destroy(&ksu_hide414_backup.te_avtab);
+	avtab_destroy(&ksu_hide414_backup.te_cond_avtab);
+	ebitmap_destroy(&ksu_hide414_backup.permissive_map);
+	memset(&ksu_hide414_backup, 0, sizeof(ksu_hide414_backup));
 }
+
+void ksu_selinux_backup_for_hide_414(struct policydb *live)
+{
+	int ret;
+
+	if (!live)
+		return;
+	mutex_lock(&ksu_hide414_mutex);
+	if (ksu_hide414_backup.valid)
+		goto out;
+
+	memset(&ksu_hide414_backup, 0, sizeof(ksu_hide414_backup));
+
+	ret = ksu_hide414_copy_avtab(&ksu_hide414_backup.te_avtab,
+				     &live->te_avtab);
+	if (ret) {
+		pr_err("selinux_hide414: backup te_avtab failed: %d\n", ret);
+		goto out;
+	}
+	ret = ksu_hide414_copy_avtab(&ksu_hide414_backup.te_cond_avtab,
+				     &live->te_cond_avtab);
+	if (ret) {
+		pr_err("selinux_hide414: backup cond_avtab failed: %d\n", ret);
+		avtab_destroy(&ksu_hide414_backup.te_avtab);
+		goto out;
+	}
+	ret = ebitmap_cpy(&ksu_hide414_backup.permissive_map,
+			  &live->permissive_map);
+	if (ret) {
+		pr_err("selinux_hide414: backup permissive failed: %d\n", ret);
+		avtab_destroy(&ksu_hide414_backup.te_avtab);
+		avtab_destroy(&ksu_hide414_backup.te_cond_avtab);
+		goto out;
+	}
+	ksu_hide414_backup.p_types_nprim = live->p_types.nprim;
+	ksu_hide414_backup.p_roles_nprim = live->p_roles.nprim;
+	ksu_hide414_backup.p_users_nprim = live->p_users.nprim;
+	ksu_hide414_backup.policyvers = live->policyvers;
+	ksu_hide414_backup.allow_unknown = live->allow_unknown;
+	ksu_hide414_backup.valid = true;
+	pr_info("selinux_hide414: pristine backup taken (types=%u roles=%u users=%u av=%u)\n",
+		ksu_hide414_backup.p_types_nprim,
+		ksu_hide414_backup.p_roles_nprim,
+		ksu_hide414_backup.p_users_nprim,
+		ksu_hide414_backup.te_avtab.nel);
+out:
+	mutex_unlock(&ksu_hide414_mutex);
+}
+
+/* Build a pristine view: live structs with backup AVTABs/nprims. Caller must
+ * ensure backup.valid. View shares live symtabs/class/role pointers (KSU
+ * does not modify them except appending types, guarded by nprim checks). */
+static void ksu_hide414_build_view(struct policydb *view)
+{
+	*view = policydb;
+	view->te_avtab = ksu_hide414_backup.te_avtab;
+	view->te_cond_avtab = ksu_hide414_backup.te_cond_avtab;
+	view->permissive_map = ksu_hide414_backup.permissive_map;
+	view->p_types.nprim = ksu_hide414_backup.p_types_nprim;
+	view->p_roles.nprim = ksu_hide414_backup.p_roles_nprim;
+	view->p_users.nprim = ksu_hide414_backup.p_users_nprim;
+	view->policyvers = ksu_hide414_backup.policyvers;
+	view->allow_unknown = ksu_hide414_backup.allow_unknown;
+}
+
+static int ksu_hide414_constraint_eval(struct policydb *p,
+				       struct context *scontext,
+				       struct context *tcontext,
+				       struct context *xcontext,
+				       struct constraint_expr *cexpr)
+{
+	u32 val1, val2;
+	struct context *c;
+	struct role_datum *r1, *r2;
+	struct mls_level *l1, *l2;
+	struct constraint_expr *e;
+	int s[CEXPR_MAXDEPTH];
+	int sp = -1;
+
+	for (e = cexpr; e; e = e->next) {
+		switch (e->expr_type) {
+		case CEXPR_NOT:
+			BUG_ON(sp < 0);
+			s[sp] = !s[sp];
+			break;
+		case CEXPR_AND:
+			BUG_ON(sp < 1);
+			sp--;
+			s[sp] &= s[sp + 1];
+			break;
+		case CEXPR_OR:
+			BUG_ON(sp < 1);
+			sp--;
+			s[sp] |= s[sp + 1];
+			break;
+		case CEXPR_ATTR:
+			if (sp == (CEXPR_MAXDEPTH - 1))
+				return 0;
+			switch (e->attr) {
+			case CEXPR_USER:
+				val1 = scontext->user;
+				val2 = tcontext->user;
+				break;
+			case CEXPR_TYPE:
+				val1 = scontext->type;
+				val2 = tcontext->type;
+				break;
+			case CEXPR_ROLE:
+				val1 = scontext->role;
+				val2 = tcontext->role;
+				r1 = p->role_val_to_struct[val1 - 1];
+				r2 = p->role_val_to_struct[val2 - 1];
+				switch (e->op) {
+				case CEXPR_DOM:
+					s[++sp] = ebitmap_get_bit(&r1->dominates, val2 - 1);
+					continue;
+				case CEXPR_DOMBY:
+					s[++sp] = ebitmap_get_bit(&r2->dominates, val1 - 1);
+					continue;
+				case CEXPR_INCOMP:
+					s[++sp] = (!ebitmap_get_bit(&r1->dominates, val2 - 1) &&
+						   !ebitmap_get_bit(&r2->dominates, val1 - 1));
+					continue;
+				default:
+					break;
+				}
+				break;
+			case CEXPR_L1L2:
+				l1 = &(scontext->range.level[0]);
+				l2 = &(tcontext->range.level[0]);
+				goto mls_ops;
+			case CEXPR_L1H2:
+				l1 = &(scontext->range.level[0]);
+				l2 = &(tcontext->range.level[1]);
+				goto mls_ops;
+			case CEXPR_H1L2:
+				l1 = &(scontext->range.level[1]);
+				l2 = &(tcontext->range.level[0]);
+				goto mls_ops;
+			case CEXPR_H1H2:
+				l1 = &(scontext->range.level[1]);
+				l2 = &(tcontext->range.level[1]);
+				goto mls_ops;
+			case CEXPR_L1H1:
+				l1 = &(scontext->range.level[0]);
+				l2 = &(scontext->range.level[1]);
+				goto mls_ops;
+			case CEXPR_L2H2:
+				l1 = &(tcontext->range.level[0]);
+				l2 = &(tcontext->range.level[1]);
+				goto mls_ops;
+mls_ops:
+				switch (e->op) {
+				case CEXPR_EQ:
+					s[++sp] = mls_level_eq(l1, l2);
+					continue;
+				case CEXPR_NEQ:
+					s[++sp] = !mls_level_eq(l1, l2);
+					continue;
+				case CEXPR_DOM:
+					s[++sp] = mls_level_dom(l1, l2);
+					continue;
+				case CEXPR_DOMBY:
+					s[++sp] = mls_level_dom(l2, l1);
+					continue;
+				case CEXPR_INCOMP:
+					s[++sp] = mls_level_incomp(l2, l1);
+					continue;
+				default:
+					BUG();
+					return 0;
+				}
+				break;
+			default:
+				BUG();
+				return 0;
+			}
+			switch (e->op) {
+			case CEXPR_EQ:
+				s[++sp] = (val1 == val2);
+				break;
+			case CEXPR_NEQ:
+				s[++sp] = (val1 != val2);
+				break;
+			default:
+				BUG();
+				return 0;
+			}
+			break;
+		case CEXPR_NAMES:
+			if (sp == (CEXPR_MAXDEPTH - 1))
+				return 0;
+			c = scontext;
+			if (e->attr & CEXPR_TARGET)
+				c = tcontext;
+			else if (e->attr & CEXPR_XTARGET) {
+				c = xcontext;
+				if (!c) {
+					BUG();
+					return 0;
+				}
+			}
+			if (e->attr & CEXPR_USER)
+				val1 = c->user;
+			else if (e->attr & CEXPR_ROLE)
+				val1 = c->role;
+			else if (e->attr & CEXPR_TYPE)
+				val1 = c->type;
+			else {
+				BUG();
+				return 0;
+			}
+			switch (e->op) {
+			case CEXPR_EQ:
+				s[++sp] = ebitmap_get_bit(&e->names, val1 - 1);
+				break;
+			case CEXPR_NEQ:
+				s[++sp] = !ebitmap_get_bit(&e->names, val1 - 1);
+				break;
+			default:
+				BUG();
+				return 0;
+			}
+			break;
+		default:
+			BUG();
+			return 0;
+		}
+	}
+	BUG_ON(sp != 0);
+	return s[0];
+}
+
+static void ksu_hide414_bounds_av(struct policydb *p,
+				  struct context *scontext,
+				  struct context *tcontext,
+				  u16 tclass, struct av_decision *avd);
+
+static void ksu_hide414_compute_av(struct policydb *p,
+				   struct context *scontext,
+				   struct context *tcontext,
+				   u16 tclass, struct av_decision *avd,
+				   struct extended_perms *xperms)
+{
+	struct constraint_node *constraint;
+	struct role_allow *ra;
+	struct avtab_key avkey;
+	struct avtab_node *node;
+	struct class_datum *tclass_datum;
+	struct ebitmap *sattr, *tattr;
+	struct ebitmap_node *snode, *tnode;
+	unsigned int i, j;
+
+	avd->allowed = 0;
+	avd->auditallow = 0;
+	avd->auditdeny = 0xffffffff;
+	if (xperms) {
+		memset(&xperms->drivers, 0, sizeof(xperms->drivers));
+		xperms->len = 0;
+	}
+
+	if (unlikely(!tclass || tclass > p->p_classes.nprim)) {
+		pr_warn_ratelimited("SELinux: hide414 invalid class %u\n", tclass);
+		return;
+	}
+	tclass_datum = p->class_val_to_struct[tclass - 1];
+
+	avkey.target_class = tclass;
+	avkey.specified = AVTAB_AV | AVTAB_XPERMS;
+	/* 4.14: flex_array */
+	sattr = flex_array_get(p->type_attr_map_array, scontext->type - 1);
+	tattr = flex_array_get(p->type_attr_map_array, tcontext->type - 1);
+	if (!sattr || !tattr)
+		return;
+	ebitmap_for_each_positive_bit(sattr, snode, i) {
+		ebitmap_for_each_positive_bit(tattr, tnode, j) {
+			avkey.source_type = i + 1;
+			avkey.target_type = j + 1;
+			for (node = avtab_search_node(&p->te_avtab, &avkey);
+			     node;
+			     node = avtab_search_node_next(node, avkey.specified)) {
+				if (node->key.specified == AVTAB_ALLOWED)
+					avd->allowed |= node->datum.u.data;
+				else if (node->key.specified == AVTAB_AUDITALLOW)
+					avd->auditallow |= node->datum.u.data;
+				else if (node->key.specified == AVTAB_AUDITDENY)
+					avd->auditdeny &= node->datum.u.data;
+				else if (xperms && (node->key.specified & AVTAB_XPERMS))
+					services_compute_xperms_drivers(xperms, node);
+			}
+			cond_compute_av(&p->te_cond_avtab, &avkey, avd, xperms);
+		}
+	}
+
+	constraint = tclass_datum->constraints;
+	while (constraint) {
+		if ((constraint->permissions & avd->allowed) &&
+		    !ksu_hide414_constraint_eval(p, scontext, tcontext, NULL,
+						 constraint->expr))
+			avd->allowed &= ~constraint->permissions;
+		constraint = constraint->next;
+	}
+
+	if (tclass == p->process_class &&
+	    (avd->allowed & p->process_trans_perms) &&
+	    scontext->role != tcontext->role) {
+		for (ra = p->role_allow; ra; ra = ra->next) {
+			if (scontext->role == ra->role &&
+			    tcontext->role == ra->new_role)
+				break;
+		}
+		if (!ra)
+			avd->allowed &= ~p->process_trans_perms;
+	}
+
+	ksu_hide414_bounds_av(p, scontext, tcontext, tclass, avd);
+}
+
+static void ksu_hide414_bounds_av(struct policydb *p,
+				  struct context *scontext,
+				  struct context *tcontext,
+				  u16 tclass, struct av_decision *avd)
+{
+	struct context lo_scontext;
+	struct context lo_tcontext, *tcontextp = tcontext;
+	struct av_decision lo_avd;
+	struct type_datum *source;
+	struct type_datum *target;
+	u32 masked = 0;
+
+	/* 4.14: flex_array */
+	source = flex_array_get_ptr(p->type_val_to_struct_array,
+				    scontext->type - 1);
+	BUG_ON(!source);
+	if (!source->bounds)
+		return;
+	target = flex_array_get_ptr(p->type_val_to_struct_array,
+				    tcontext->type - 1);
+	BUG_ON(!target);
+
+	memset(&lo_avd, 0, sizeof(lo_avd));
+	memcpy(&lo_scontext, scontext, sizeof(lo_scontext));
+	lo_scontext.type = source->bounds;
+	if (target->bounds) {
+		memcpy(&lo_tcontext, tcontext, sizeof(lo_tcontext));
+		lo_tcontext.type = target->bounds;
+		tcontextp = &lo_tcontext;
+	}
+	ksu_hide414_compute_av(p, &lo_scontext, tcontextp, tclass, &lo_avd, NULL);
+	masked = ~lo_avd.allowed & avd->allowed;
+	if (likely(!masked))
+		return;
+	avd->allowed &= ~masked;
+}
+
+/* String -> context via live hashtabs (like 4.14 string_to_context_struct),
+ * then reject KSU-appended types/roles/users (value > backup nprim) and
+ * validate against pristine view. No static sidtab access: MLS parsed with
+ * NULL sidtab like services.c:1887. */
+static int ksu_hide414_str_to_context(struct policydb *view,
+				      const char *scontext, u32 len,
+				      struct context *ctx)
+{
+	char *tmp, *p, *sp, oldc;
+	struct role_datum *role;
+	struct type_datum *typ;
+	struct user_datum *usr;
+	int rc = -EINVAL;
+
+	if (!len)
+		return -EINVAL;
+	tmp = kmemdup_nul(scontext, len, GFP_KERNEL);
+	if (!tmp)
+		return -ENOMEM;
+	context_init(ctx);
+
+	p = tmp;
+	sp = strchr(p, ':');
+	if (!sp)
+		goto out;
+	*sp++ = '\0';
+	usr = hashtab_search(view->p_users.table, p);
+	if (!usr)
+		goto out;
+	if (usr->value > (int)ksu_hide414_backup.p_users_nprim)
+		goto out;
+	ctx->user = usr->value;
+
+	p = sp;
+	sp = strchr(p, ':');
+	if (!sp)
+		goto out;
+	*sp++ = '\0';
+	role = hashtab_search(view->p_roles.table, p);
+	if (!role)
+		goto out;
+	if (role->value > (int)ksu_hide414_backup.p_roles_nprim)
+		goto out;
+	ctx->role = role->value;
+
+	p = sp;
+	sp = strchr(p, ':');
+	oldc = sp ? *sp : 0;
+	if (sp)
+		*sp++ = '\0';
+	typ = hashtab_search(view->p_types.table, p);
+	if (!typ || typ->attribute)
+		goto out;
+	if (typ->value > (int)ksu_hide414_backup.p_types_nprim)
+		goto out;
+	ctx->type = typ->value;
+
+	if (sp) {
+		char *mls_p = sp;
+		/* KSU never touches MLS levels, parse with pristine view */
+		if (mls_context_to_sid(view, oldc, &mls_p, ctx, NULL,
+				       SECSID_NULL))
+			goto out;
+		if ((mls_p - tmp) < (int)len)
+			goto out;
+	} else {
+		if (view->mls_enabled)
+			goto out;
+	}
+	if (!policydb_context_isvalid(view, ctx))
+		goto out;
+	rc = 0;
+out:
+	if (rc)
+		context_destroy(ctx);
+	kfree(tmp);
+	return rc;
+}
+
+enum ksu_hide414_sel_inos {
+	KSU_HIDE_SEL_ROOT_INO = 2,
+	KSU_HIDE_SEL_LOAD,
+	KSU_HIDE_SEL_ENFORCE,
+	KSU_HIDE_SEL_CONTEXT,
+	KSU_HIDE_SEL_ACCESS,
+	KSU_HIDE_SEL_CREATE,
+	KSU_HIDE_SEL_RELABEL,
+	KSU_HIDE_SEL_USER,
+	KSU_HIDE_SEL_POLICYVERS,
+	KSU_HIDE_SEL_COMMIT_BOOLS,
+	KSU_HIDE_SEL_MLS,
+	KSU_HIDE_SEL_DISABLE,
+	KSU_HIDE_SEL_MEMBER,
+	KSU_HIDE_SEL_CHECKREQPROT,
+	KSU_HIDE_SEL_COMPAT_NET,
+	KSU_HIDE_SEL_REJECT_UNKNOWN,
+	KSU_HIDE_SEL_DENY_UNKNOWN,
+	KSU_HIDE_SEL_STATUS,
+	KSU_HIDE_SEL_POLICY,
+	KSU_HIDE_SEL_VALIDATE_TRANS,
+};
+
+typedef ssize_t (*ksu_hide414_write_op_fn)(struct file *, char *, size_t);
+
+static ksu_hide414_write_op_fn *ksu_hide414_write_op;
+static ksu_hide414_write_op_fn *ksu_hide414_context_write;
+static ksu_hide414_write_op_fn ksu_hide414_orig_context_write;
+static ksu_hide414_write_op_fn *ksu_hide414_access_write;
+static ksu_hide414_write_op_fn ksu_hide414_orig_access_write;
+
+static ssize_t ksu_hide414_my_write_context(struct file *file, char *buf,
+					    size_t size)
+{
+	struct policydb view;
+	struct context ctx;
+	char *canon = NULL;
+	u32 sid, len;
+	ssize_t ret;
+
+	if (likely(current_uid().val < 10000))
+		return ksu_hide414_orig_context_write(file, buf, size);
+	if (!ksu_hide414_backup.valid)
+		return ksu_hide414_orig_context_write(file, buf, size);
+
+	ret = avc_has_perm(current_sid(), SECINITSID_SECURITY,
+			   SECCLASS_SECURITY, SECURITY__CHECK_CONTEXT, NULL);
+	if (ret)
+		return ret;
+
+	ksu_hide414_build_view(&view);
+	ret = ksu_hide414_str_to_context(&view, buf, size, &ctx);
+	if (ret)
+		return ret;
+	/* Map back via live sid then to string: pristine types map 1:1 */
+	if (security_context_to_sid(buf, size, &sid, GFP_KERNEL)) {
+		context_destroy(&ctx);
+		return -EINVAL;
+	}
+	context_destroy(&ctx);
+	/* Re-derive canonical from pristine view by sid lookup on live?
+	 * KSU types already rejected, so live canonical == pristine. */
+	ret = security_sid_to_context(sid, &canon, &len);
+	if (ret)
+		return ret;
+	if (len > SIMPLE_TRANSACTION_LIMIT) {
+		kfree(canon);
+		return -ERANGE;
+	}
+	memcpy(buf, canon, len);
+	kfree(canon);
+	return len;
+}
+
+static ssize_t ksu_hide414_my_write_access(struct file *file, char *buf,
+					   size_t size)
+{
+	struct policydb view;
+	struct context sctx, tctx;
+	char *scon = NULL, *tcon = NULL;
+	u16 tclass;
+	struct av_decision avd;
+	ssize_t ret;
+
+	if (likely(current_uid().val < 10000))
+		return ksu_hide414_orig_access_write(file, buf, size);
+	if (!ksu_hide414_backup.valid)
+		return ksu_hide414_orig_access_write(file, buf, size);
+
+	ret = avc_has_perm(current_sid(), SECINITSID_SECURITY,
+			   SECCLASS_SECURITY, SECURITY__COMPUTE_AV, NULL);
+	if (ret)
+		return ret;
+
+	scon = kzalloc(size + 1, GFP_KERNEL);
+	if (!scon)
+		return -ENOMEM;
+	tcon = kzalloc(size + 1, GFP_KERNEL);
+	if (!tcon) {
+		kfree(scon);
+		return -ENOMEM;
+	}
+	if (sscanf(buf, "%s %s %hu", scon, tcon, &tclass) != 3) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	ksu_hide414_build_view(&view);
+	if (ksu_hide414_str_to_context(&view, scon, strlen(scon), &sctx) ||
+	    ksu_hide414_str_to_context(&view, tcon, strlen(tcon), &tctx)) {
+		ret = -EINVAL;
+		goto out;
+	}
+	/* permissive from pristine */
+	if (ebitmap_get_bit(&view.permissive_map, sctx.type))
+		avd.flags = AVD_FLAGS_PERMISSIVE;
+	else
+		avd.flags = 0;
+	avd.seqno = 1;
+	ksu_hide414_compute_av(&view, &sctx, &tctx, tclass, &avd, NULL);
+	context_destroy(&sctx);
+	context_destroy(&tctx);
+
+	ret = scnprintf(buf, SIMPLE_TRANSACTION_LIMIT, "%x %x %x %x %u %x",
+			avd.allowed, 0xffffffff, avd.auditallow,
+			avd.auditdeny, avd.seqno, avd.flags);
+out:
+	kfree(tcon);
+	kfree(scon);
+	return ret;
+}
+
+static int ksu_hide414_my_setprocattr(const char *name, void *value,
+				      size_t size);
+static struct ksu_lsm_hook ksu_hide414_setprocattr_hook =
+	KSU_LSM_HOOK_INIT(setprocattr, "selinux_setprocattr",
+			  ksu_hide414_my_setprocattr, 0);
+
+typedef int (*ksu_hide414_setprocattr_fn)(const char *name, void *value,
+					  size_t size);
+static int __nocfi ksu_hide414_my_setprocattr(const char *name, void *value,
+					      size_t size)
+{
+	struct policydb view;
+	struct context ctx;
+	u32 mysid, sid;
+	char *str = value;
+	int err;
+
+	if (likely(current_uid().val < 10000))
+		goto call_orig;
+	if (strcmp(name, "current"))
+		goto call_orig;
+	if (!ksu_hide414_backup.valid)
+		goto call_orig;
+
+	mysid = current_sid();
+	err = avc_has_perm(mysid, mysid, SECCLASS_PROCESS,
+			   PROCESS__SETCURRENT, NULL);
+	if (err)
+		return err;
+
+	if (size && str[0] && str[0] != '\n') {
+		if (str[size - 1] == '\n') {
+			str[size - 1] = '\0';
+			size--;
+		}
+		ksu_hide414_build_view(&view);
+		err = ksu_hide414_str_to_context(&view, str, size, &ctx);
+		if (err)
+			return err;
+		/* pristine valid; translate to live sid for real set */
+		err = security_context_to_sid(str, size, &sid, GFP_KERNEL);
+		context_destroy(&ctx);
+		if (err)
+			return err;
+	}
+call_orig:
+	return ((ksu_hide414_setprocattr_fn)
+		ksu_hide414_setprocattr_hook.original)(name, value, size);
+}
+
+/* Fake enforcing status for apps, like 5.x */
+static struct page *ksu_hide414_fake_status;
+
+static void ksu_hide414_init_fake_status(void)
+{
+	struct page *pg = selinux_kernel_status_page();
+	struct selinux_kernel_status *st, *nst;
+	struct page *np;
+
+	if (ksu_hide414_fake_status || !pg)
+		return;
+	st = page_address(pg);
+	if (!st->enforcing && !ksu_late_loaded)
+		return;
+	np = alloc_page(GFP_KERNEL | __GFP_ZERO);
+	if (!np)
+		return;
+	nst = page_address(np);
+	memcpy(nst, st, sizeof(*nst));
+	if (ksu_late_loaded && !nst->enforcing) {
+		nst->enforcing = 1;
+		nst->sequence = nst->policyload ? 4 : 0;
+	}
+	ksu_hide414_fake_status = np;
+	pr_info("selinux_hide414: fake status ready (enforcing=%u seq=%u load=%u)\n",
+		nst->enforcing, nst->sequence, nst->policyload);
+}
+
+typedef int (*ksu_hide414_status_open_fn)(struct inode *, struct file *);
+static ksu_hide414_status_open_fn ksu_hide414_orig_status_open;
+static ksu_hide414_status_open_fn *ksu_hide414_status_slot;
+
+static int ksu_hide414_my_status_open(struct inode *inode, struct file *filp)
+{
+	if (likely(current_uid().val >= 10000 && ksu_hide414_enabled) &&
+	    ksu_hide414_fake_status) {
+		filp->private_data = ksu_hide414_fake_status;
+		return 0;
+	}
+	return ksu_hide414_orig_status_open(inode, filp);
+}
+
+static void ksu_hide414_hook_status(void)
+{
+	struct file_operations *ops;
+
+	if (ksu_hide414_orig_status_open)
+		return;
+	if (!ksu_hide414_status_slot) {
+		/* Direct link; fallback to kallsyms for safety */
+		ops = &sel_handle_status_ops;
+		if (!ops->open) {
+			ops = find_kernel_symbol_exact("sel_handle_status_ops");
+			if (!ops) {
+				pr_err("selinux_hide414: status ops not found\n");
+				return;
+			}
+		}
+		ksu_hide414_status_slot = &ops->open;
+	}
+	/* 4.14 manual-hook: ksu_patch_text is a stub (-ENOSYS); these slots
+	 * live in writable .data so direct assignment is enough. */
+	ksu_hide414_orig_status_open = *ksu_hide414_status_slot;
+	WRITE_ONCE(*ksu_hide414_status_slot, ksu_hide414_my_status_open);
+	smp_wmb();
+}
+
+static void ksu_hide414_unhook(void)
+{
+	if (ksu_hide414_orig_context_write) {
+		WRITE_ONCE(*ksu_hide414_context_write,
+			   ksu_hide414_orig_context_write);
+		smp_wmb();
+		ksu_hide414_orig_context_write = NULL;
+	}
+	if (ksu_hide414_orig_access_write) {
+		WRITE_ONCE(*ksu_hide414_access_write,
+			   ksu_hide414_orig_access_write);
+		smp_wmb();
+		ksu_hide414_orig_access_write = NULL;
+	}
+	if (ksu_hide414_status_slot && ksu_hide414_orig_status_open) {
+		WRITE_ONCE(*ksu_hide414_status_slot,
+			   ksu_hide414_orig_status_open);
+		smp_wmb();
+		ksu_hide414_orig_status_open = NULL;
+	}
+	ksu_lsm_unhook(&ksu_hide414_setprocattr_hook);
+}
+
+static int ksu_hide414_enable(void)
+{
+	int ret;
+
+	pr_info("selinux_hide414: enable (directlink v2)\n");
+	if (!ksu_hide414_backup.valid) {
+		pr_err("selinux_hide414: no backup, reboot after first KSU rules\n");
+		return -EAGAIN;
+	}
+	/* Direct link into selinuxfs (built-in); kallsyms not needed */
+	ksu_hide414_write_op = (ksu_hide414_write_op_fn *)write_op;
+	if (!ksu_hide414_write_op) {
+		pr_err("selinux_hide414: write_op not found\n");
+		return -ENOSYS;
+	}
+	ksu_hide414_hook_status();
+
+	ksu_hide414_context_write =
+		&ksu_hide414_write_op[KSU_HIDE_SEL_CONTEXT];
+	pr_info("selinux_hide414: context_write %pSb\n",
+		*ksu_hide414_context_write);
+	ksu_hide414_orig_context_write = *ksu_hide414_context_write;
+	WRITE_ONCE(*ksu_hide414_context_write, ksu_hide414_my_write_context);
+	smp_wmb();
+	ksu_hide414_access_write = &ksu_hide414_write_op[KSU_HIDE_SEL_ACCESS];
+	ksu_hide414_orig_access_write = *ksu_hide414_access_write;
+	WRITE_ONCE(*ksu_hide414_access_write, ksu_hide414_my_write_access);
+	smp_wmb();
+	/* setprocattr LSM hook needs text patching (stub on 4.14 manual);
+	 * keep hide working without it instead of failing enable. */
+	ret = ksu_lsm_hook(&ksu_hide414_setprocattr_hook);
+	if (ret)
+		pr_warn("selinux_hide414: setprocattr hook unavailable %d (continuing)\n",
+			ret);
+	return 0;
+}
+
+static void ksu_hide414_disable(void)
+{
+	pr_info("selinux_hide414: disable\n");
+	ksu_hide414_unhook();
+}
+
+static int ksu_hide414_feature_get(u64 *value)
+{
+	*value = ksu_hide414_enabled ? 1 : 0;
+	return 0;
+}
+
+static int ksu_hide414_feature_set(u64 value)
+{
+	bool en = value != 0;
+	int ret = 0;
+
+	pr_info("selinux_hide414: set %d\n", en);
+	mutex_lock(&ksu_hide414_mutex);
+	ksu_hide414_enabled = en;
+	if (en) {
+		if (!ksu_hide414_running) {
+			ret = ksu_hide414_enable();
+			if (!ret)
+				ksu_hide414_running = true;
+		}
+	} else {
+		if (ksu_hide414_running) {
+			ksu_hide414_disable();
+			ksu_hide414_running = false;
+		}
+	}
+	mutex_unlock(&ksu_hide414_mutex);
+	return ret;
+}
+
+static const struct ksu_feature_handler ksu_hide414_handler = {
+	.feature_id = KSU_FEATURE_SELINUX_HIDE,
+	.name = "selinux_hide",
+	.get_handler = ksu_hide414_feature_get,
+	.set_handler = ksu_hide414_feature_set,
+};
+
+void __init ksu_selinux_hide_init(void)
+{
+	if (ksu_register_feature_handler(&ksu_hide414_handler))
+		pr_err("selinux_hide414: register handler failed\n");
+	if (ksu_late_loaded)
+		ksu_hide414_init_fake_status();
+	ksu_hide414_hook_status();
+}
+
+void __exit ksu_selinux_hide_exit(void)
+{
+	mutex_lock(&ksu_hide414_mutex);
+	if (ksu_hide414_running) {
+		ksu_hide414_disable();
+		ksu_hide414_running = false;
+	}
+	mutex_unlock(&ksu_hide414_mutex);
+	ksu_unregister_feature_handler(KSU_FEATURE_SELINUX_HIDE);
+	if (ksu_hide414_fake_status)
+		__free_page(ksu_hide414_fake_status);
+	ksu_hide414_fake_status = NULL;
+}
+
 void ksu_selinux_hide_drop_backup_if_unused(void)
 {
+	mutex_lock(&ksu_hide414_mutex);
+	if (!ksu_hide414_running && ksu_hide414_backup.valid) {
+		pr_info("selinux_hide414: not enabled, drop backup\n");
+		ksu_hide414_free_backup_locked();
+	}
+	mutex_unlock(&ksu_hide414_mutex);
 }
+
 void ksu_selinux_hide_handle_second_stage(void)
 {
+	ksu_hide414_init_fake_status();
 }
+
 void ksu_selinux_hide_handle_post_fs_data(void)
 {
+	if (!ksu_hide414_fake_status)
+		pr_err("selinux_hide414: fake status missing after post-fs-data\n");
 }
 #endif

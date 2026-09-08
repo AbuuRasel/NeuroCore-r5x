@@ -17,6 +17,7 @@
 #include "selinux.h"
 #include "sepolicy.h"
 #include "ss/services.h"
+#include "feature/selinux_hide.h"
 #include "linux/lsm_audit.h" // IWYU pragma: keep
 #include "xfrm.h"
 #include "compat/kernel_compat.h"
@@ -677,6 +678,11 @@ static int handle_sepolicy_fn(void *data)
 	struct handle_sepolicy_args *ctx = (struct handle_sepolicy_args *)data;
 	u8 *payload = (u8 *)ctx->ctx_payload;
 	u64 data_len = ctx->ctx_data_len;
+
+	/* 4.14 selinux_hide: snapshot pristine policy before first KSU rule.
+	 * No-op when backup already taken; safe under the caller's
+	 * write_lock/stop_machine exclusion (same as rule insertion). */
+	ksu_selinux_backup_for_hide_414(db);
 
 	cursor.cur = payload;
 	cursor.end = payload + (size_t)data_len;
