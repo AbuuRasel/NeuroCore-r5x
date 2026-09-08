@@ -19,6 +19,7 @@ typedef unsigned __poll_t;
 
 #include "objsec.h"
 
+#include "ksu.h"
 #include "klog.h" // IWYU pragma: keep
 #include "selinux/selinux.h"
 
@@ -561,6 +562,8 @@ static struct file *ksu_anon_inode_create_getfile_compat(
 int ksu_install_file_wrapper(int fd)
 {
     int out_fd, ret;
+    const struct cred *old_cred;
+    struct file *wrapper_file;
     struct file *orig_file = fget(fd);
     if (!orig_file) {
         return -EBADF;
@@ -579,9 +582,19 @@ int ksu_install_file_wrapper(int fd)
         goto out_put_fd;
     }
 
-    struct file *wrapper_file = ksu_anon_inode_create_getfile_compat(
+    /*
+     * security_inode_init_security_anon() checks FILE__CREATE against the
+     * current SELinux domain. A custom root profile may have already moved
+     * this task into a restricted domain (for example shell), so create the
+     * private wrapper inode with KernelSU's authorized credentials. The file
+     * is not published until the caller's credentials have been restored and
+     * its inode has been relabeled below.
+    */
+    old_cred = override_creds(ksu_cred);
+    wrapper_file = ksu_anon_inode_create_getfile_compat(
         "[ksu_fdwrapper]", &file_wrapper_data->ops, file_wrapper_data,
         orig_file->f_flags, NULL);
+    revert_creds(old_cred);
     if (IS_ERR(wrapper_file)) {
         pr_err("ksu_fdwrapper: getfile failed: %ld\n", PTR_ERR(wrapper_file));
         ret = PTR_ERR(wrapper_file);
