@@ -110,10 +110,11 @@ $(info -- KernelSU-Next version: $(KSU_VERSION))
 ccflags-y += -DKSU_VERSION=$(KSU_VERSION)
 else
 # If there is no .git directory, use default version
-# NeuroCore: in-tree KernelSU-Next is v3.3.0 (33214), same repo as kernel so
-# git detection above skips; use v3.3.0 number instead of 1 so manager works.
+# NeuroCore: in-tree KernelSU-Next is v3.3.0, same repo as kernel so
+# git detection above skips; use number at/above spoofed managers (33262)
+# instead of 1 so manager (incl. spoofed 33262-4) reports Working.
 $(warning "KSU_GIT_VERSION not defined! It is better to make KernelSU-Next a git repository!")
-KSU_VERSION_FALLBACK := 33214
+KSU_VERSION_FALLBACK := 33262
 $(info -- KernelSU-Next version fallback: $(KSU_VERSION_FALLBACK))
 ccflags-y += -DKSU_VERSION=$(KSU_VERSION_FALLBACK)
 endif
