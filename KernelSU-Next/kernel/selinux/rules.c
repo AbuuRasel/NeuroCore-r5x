@@ -86,6 +86,13 @@ static int apply_kernelsu_rules_fn(void *ptr)
 {
 	struct policydb *db = (struct policydb *)ptr;
 
+	/* NeuroCore hide414: snapshot pristine policy BEFORE any KSU rule.
+	 * Runs under the caller's write_lock/stop_machine exclusion in all
+	 * paths; no-op once backup is taken. Without this, a backup taken
+	 * only in handle_sepolicy_fn would already contain ksu/ksu_file and
+	 * validity oracles would still accept KSU contexts. */
+	ksu_selinux_backup_for_hide_414(db);
+
     ksu_type(db, KERNEL_SU_DOMAIN, "domain");
     ksu_permissive(db, KERNEL_SU_DOMAIN);
     ksu_typeattribute(db, KERNEL_SU_DOMAIN, "mlstrustedsubject");
