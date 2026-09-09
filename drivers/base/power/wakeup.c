@@ -7,6 +7,7 @@
  */
 
 #include <linux/device.h>
+#include <linux/moduleparam.h>
 #include <linux/slab.h>
 #include <linux/sched/signal.h>
 #include <linux/capability.h>
@@ -637,9 +638,52 @@ static void wakeup_source_report_event(struct wakeup_source *ws, bool hard)
 		pm_system_wakeup();
 }
 
+#ifdef CONFIG_WAKELOCK_BLOCKER
+/* NeuroCore wakelock blocker (deep sleep): semicolon-separated exact
+ * names in wakelock_blocker are dropped at both activation entry points.
+ * Empty by default, so nothing is blocked until the user opts in, e.g.:
+ *   echo "wlan_rx_wake;wlan_ctrl_wake" > \
+ *     /sys/module/wakeup/parameters/wakelock_blocker
+ * Counter: /sys/module/wakeup/parameters/wakelock_blocker_count
+ */
+#define WL_BLOCKER_MAX	512
+static char wakelock_blocker[WL_BLOCKER_MAX] = "";
+static unsigned long wakelock_blocker_count;
+module_param_string(wakelock_blocker, wakelock_blocker,
+		    sizeof(wakelock_blocker), 0644);
+module_param_named(wakelock_blocker_count, wakelock_blocker_count,
+		   ulong, 0444);
+
+/* IRQ-safe, allocation-free exact-name match. */
+static bool wakelock_is_blocked(const char *name)
+{
+	const char *p = wakelock_blocker;
+	size_t nlen, len;
+
+	if (!name || !wakelock_blocker[0])
+		return false;
+	nlen = strlen(name);
+	while (*p) {
+		while (*p == ';' || *p == ' ')
+			p++;
+		if (!*p)
+			break;
+		len = 0;
+		while (p[len] && p[len] != ';')
+			len++;
+		if (nlen == len && !strncmp(name, p, len)) {
+			wakelock_blocker_count++;
+			return true;
+		}
+		p += len;
+	}
+	return false;
+}
+#endif /* CONFIG_WAKELOCK_BLOCKER */
+
 /**
  * __pm_stay_awake - Notify the PM core of a wakeup event.
- * @ws: Wakeup source object associated with the source of the event.
+ * @ws: Wakeup source object associated with the event.
  *
  * It is safe to call this function from interrupt context.
  */
@@ -649,6 +693,11 @@ void __pm_stay_awake(struct wakeup_source *ws)
 
 	if (!ws)
 		return;
+
+#ifdef CONFIG_WAKELOCK_BLOCKER
+	if (wakelock_is_blocked(ws->name))
+		return;
+#endif
 
 	spin_lock_irqsave(&ws->lock, flags);
 
@@ -848,6 +897,11 @@ void pm_wakeup_ws_event(struct wakeup_source *ws, unsigned int msec, bool hard)
 
 	if (!ws)
 		return;
+
+#ifdef CONFIG_WAKELOCK_BLOCKER
+	if (wakelock_is_blocked(ws->name))
+		return;
+#endif
 
 	spin_lock_irqsave(&ws->lock, flags);
 

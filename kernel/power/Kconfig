@@ -169,6 +169,17 @@ config PM_WAKELOCKS_GC
 	depends on PM_WAKELOCKS
 	default y
 
+config WAKELOCK_BLOCKER
+	bool "Wakelock blocker (NeuroCore deep sleep)"
+	depends on PM_SLEEP
+	default y
+	---help---
+	  Drop wakeup-source activations whose name is listed in the
+	  semicolon-separated wakelock_blocker list, helping the device
+	  reach deep sleep. Empty by default (blocks nothing).
+	  List: /sys/module/wakeup/parameters/wakelock_blocker
+	  Count: /sys/module/wakeup/parameters/wakelock_blocker_count
+
 config PM
 	bool "Device power management core functionality"
 	---help---
