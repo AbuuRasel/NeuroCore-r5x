@@ -9,9 +9,18 @@
 #   cp arch/arm64/configs/vendor/RMX1911_v330_defconfig out/.config
 #   make O=out ARCH=arm64 olddefconfig
 # and diff the result against a known-good build before shipping.
+#
+# Hiding hardening (applied on top of the validated .config):
+#   scripts/config --file out/.config -d CONFIG_KSU_SUSFS_ENABLE_LOG
+#   scripts/config --file out/.config -e CONFIG_ADRENO_IDLER \
+#     -e CONFIG_WQ_POWER_EFFICIENT_DEFAULT
+#   (ADRENO_IDLER defaults to y via Kconfig; the WQ option is a generic
+#   power-saving default. SUS_SU stays OFF to keep 3.2-style any-app su.)
 set -e
 cd "$(dirname "$0")"
 mkdir -p out
+export KBUILD_BUILD_USER=android-build
+export KBUILD_BUILD_HOST=android
 make O=out ARCH=arm64 \
   CC=clang LD=ld.lld AR=llvm-ar AS=llvm-as NM=llvm-nm \
   OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
