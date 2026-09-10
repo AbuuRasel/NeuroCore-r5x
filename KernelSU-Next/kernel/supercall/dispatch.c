@@ -1101,7 +1101,13 @@ long ksu_supercall_handle_ioctl(const struct file *filp, unsigned int cmd, void 
         cmd != KSU_IOCTL_GET_MANAGER_APPID &&
         cmd != KSU_IOCTL_GET_APP_PROFILE && cmd != KSU_IOCTL_SET_APP_PROFILE &&
         cmd != KSU_IOCTL_GET_WRAPPER_FD &&
-        cmd != KSU_IOCTL_DISABLE_ESCAPE_TO_ROOT)
+        cmd != KSU_IOCTL_DISABLE_ESCAPE_TO_ROOT &&
+        cmd != KSU_IOCTL_REPORT_EVENT &&
+        cmd != KSU_IOCTL_MANAGE_MARK &&
+        cmd != KSU_IOCTL_NUKE_EXT4_SYSFS &&
+        cmd != KSU_IOCTL_ADD_TRY_UMOUNT &&
+        cmd != KSU_IOCTL_SET_INIT_PGRP &&
+        cmd != KSU_IOCTL_GET_SULOG_FD)
         return -ENOTTY;
 #endif
 
