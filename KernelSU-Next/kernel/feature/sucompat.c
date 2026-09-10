@@ -26,7 +26,6 @@
 #include "policy/app_profile.h"
 #include "hook/syscall_hook.h"
 #include "supercall/supercall.h"
-#include "supercall/internal.h"
 #include "sulog/event.h"
 #include "ksu.h"
 #include "util.h"
@@ -228,9 +227,6 @@ long ksu_handle_execve_sucompat(const char __user **filename_user, int orig_nr, 
 	regs->__PT_PARM2_REG = empty_user_path();
 	regs->__PT_PARM1_REG = tmp_fd;
 
-	/* Self-heal a manual chmod 0700 on /data/adb* (breaks su via DAC
-	 * before SELinux is consulted). Cheap re-verify per su exec. */
-	ksu_fix_adb_access();
 	ret = escape_with_root_profile();
 	if (ret) {
 		pr_err("escape_with_root_profile failed: %ld\n", ret);
