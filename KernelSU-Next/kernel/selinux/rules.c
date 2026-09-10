@@ -78,7 +78,10 @@ static inline rwlock_t *ksu_get_policy_rwlock(void) { return &selinux_state.ss->
 #elif defined(KSU_COMPAT_HAS_EXPORTED_POLICY_RWLOCK)
 static inline rwlock_t *ksu_get_policy_rwlock(void) { extern rwlock_t policy_rwlock; return &policy_rwlock; }
 #else
-static inline rwlock_t *ksu_get_policy_rwlock(void) { return NULL; }
+/* NeuroCore 4.14: policy_rwlock is de-staticated in ss/services.c above,
+ * so use the real write_lock path (sleepable, reliable) instead of
+ * stop_machine, same as the EXPORTED case. */
+static inline rwlock_t *ksu_get_policy_rwlock(void) { extern rwlock_t policy_rwlock; return &policy_rwlock; }
 #endif
 #endif // #ifndef SELINUX_POLICY_INSTEAD_SELINUX_SS
 

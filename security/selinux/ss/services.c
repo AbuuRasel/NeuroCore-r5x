@@ -87,7 +87,10 @@ int selinux_policycap_alwaysnetwork;
 int selinux_policycap_cgroupseclabel;
 int selinux_policycap_nnp_nosuid_transition;
 
-static DEFINE_RWLOCK(policy_rwlock);
+/* NeuroCore: global (was static) so KernelSU-Next can take write_lock
+ * instead of stop_machine on 4.14; lets hide414 snapshot with sleepable
+ * allocations and makes boot rule application reliable. */
+DEFINE_RWLOCK(policy_rwlock);
 
 static struct sidtab sidtab;
 struct policydb policydb;
