@@ -379,7 +379,22 @@ prune:
 #ifdef CONFIG_KSU_DISABLE_PRUNE
 	pr_info("throne: prune skipped (debug)\n");
 #else
-	ksu_prune_allowlist(is_uid_exist, &uid_list);
+	{
+		struct uid_data *pc;
+		unsigned int parsed = 0;
+		list_for_each_entry (pc, &uid_list, list)
+			parsed++;
+		/* NeuroCore: packages.list can be torn (PMS rewriting) or
+		 * unreadable-yet at boot_completed; pruning against a
+		 * partial list would nuke valid grants (kills su). Only
+		 * prune when the parsed inventory covers the allowlist. */
+		if (parsed < ksu_allow_list_count()) {
+			pr_warn("throne: skip prune, parsed %u < allowlist %u (torn read?)\n",
+				parsed, ksu_allow_list_count());
+		} else {
+			ksu_prune_allowlist(is_uid_exist, &uid_list);
+		}
+	}
 #endif
 out:
 	// free uid_list

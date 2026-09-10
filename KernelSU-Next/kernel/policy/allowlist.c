@@ -69,6 +69,11 @@ struct perm_data {
 static DEFINE_HASHTABLE(allow_list, ALLOW_LIST_BITS);
 static u16 allow_list_count = 0;
 
+u16 ksu_allow_list_count(void)
+{
+    return allow_list_count;
+}
+
 #define KERNEL_SU_ALLOWLIST "/data/adb/ksu/.allowlist"
 
 void ksu_persistent_allow_list(void);
