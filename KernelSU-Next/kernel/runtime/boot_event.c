@@ -15,10 +15,46 @@
 #include "selinux/selinux.h"
 #include "ss/services.h"
 
+/* TEMP mirror: shared in-memory narrative (see rules.c). */
+#ifndef KSU_BOOTLOG_DECL
+#define KSU_BOOTLOG_DECL
+extern void ksu_bootlog(const char *msg);
+#endif
+static void boot_mark(const char *msg)
+{
+	ksu_bootlog(msg);
+}
+
 bool ksu_module_mounted __read_mostly = false;
 bool ksu_boot_completed __read_mostly = false;
 
 extern void ksu_avc_spoof_late_init(void);
+
+/* TEMP narrative helper is in rules.c; mirrored tiny logger here. */
+extern void ksu_bootlog(const char *msg);
+
+/* NeuroCore: guarantee base rules exist at every post-load checkpoint.
+ * Custom ROMs may load/reload policy after second_stage, wiping the
+ * boot-time application; post-fs-data and boot-completed both run long
+ * after the policy is live, so re-apply if ksu is missing. */
+static void ksu_ensure_rules(const char *where)
+{
+    char msg[96];
+
+    if (ksu_exists(&policydb, KERNEL_SU_DOMAIN)) {
+        scnprintf(msg, sizeof(msg), "%s: ksu PRESENT, no heal needed",
+                  where);
+        ksu_bootlog(msg);
+        return;
+    }
+    pr_warn("%s: ksu rules missing, re-applying\n", where);
+    scnprintf(msg, sizeof(msg), "%s: ksu MISSING, re-applying", where);
+    ksu_bootlog(msg);
+    apply_kernelsu_rules();
+    ksu_load_allow_list();
+    boot_mark(ksu_exists(&policydb, KERNEL_SU_DOMAIN) ?
+              "heal OK, ksu PRESENT" : "heal FAILED, ksu MISSING");
+}
 
 void on_post_fs_data(void)
 {
@@ -32,10 +68,8 @@ void on_post_fs_data(void)
     done = true;
     pr_info("on_post_fs_data!\n");
 
-    /* NeuroCore: 711 from boot itself so no module is needed for su
-     * traversal (re-tried on grant/su exec for later chmod 700). */
-    ksu_fix_adb_access();
     ksu_load_allow_list();
+    ksu_ensure_rules("post-fs-data");
     ksu_observer_init();
     // Sanity check for safe mode only needs early-boot input samples.
     ksu_stop_input_hook_runtime();
@@ -80,13 +114,7 @@ void on_boot_completed(void)
      * (missed second_stage or a dropped stop_machine op), the live
      * policy has no ksu domain and su can never be granted. Re-apply
      * now while locking is safe; harmless if already applied. */
-    if (!ksu_exists(&policydb, KERNEL_SU_DOMAIN)) {
-        pr_warn("on_boot_completed: ksu rules missing, re-applying\n");
-        apply_kernelsu_rules();
-        /* Rules were absent when the allowlist was first loaded, so it
-         * is empty; reload now that MAC allows the read. */
-        ksu_load_allow_list();
-    }
+    ksu_ensure_rules("boot_completed");
     ksu_selinux_hide_drop_backup_if_unused();
     ksu_avc_spoof_late_init();
 }
