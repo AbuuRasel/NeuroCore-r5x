@@ -28,57 +28,72 @@
 #include "sulog/fd.h"
 #include "supercall/supercall.h"
 
+/* NeuroCore: ensure /data/adb* is traversable/executable by apps.
+ * PBRP/recovery, locked installs - or a manual chmod 0700 for hiding -
+ * leave 0700 which breaks su for third-party apps (DAC denies traversal
+ * before SELinux is even consulted). Only ADDS o+rX, never removes bits.
+ * Runs with ksu_cred (manager-proven domain for adb_data_file setattr).
+ * Called on grant AND on every su exec (self-heals a later chmod 700). */
+void ksu_fix_adb_access(void)
+{
+    static bool adb_fixed = false;
+    static bool ksud_fixed = false;
+    if (!adb_fixed || !ksud_fixed) {
+        const char *paths[2] = { "/data/adb", "/data/adb/ksud" };
+        bool *done[2] = { &adb_fixed, &ksud_fixed };
+        int i;
+        for (i = 0; i < 2; i++) {
+            struct path path;
+            struct inode *inode;
+            const struct cred *old;
+            if (*done[i]) {
+                /* Re-verify: a later manual chmod 0700 must self-heal. */
+                if (kern_path(paths[i], LOOKUP_FOLLOW, &path))
+                    continue;
+                inode = d_backing_inode(path.dentry);
+                if (inode && (inode->i_mode & 0005) == 0005) {
+                    path_put(&path);
+                    continue;
+                }
+                path_put(&path);
+                *done[i] = false;
+            }
+            if (kern_path(paths[i], LOOKUP_FOLLOW, &path))
+                continue; /* not mounted/created yet; retry next time */
+            inode = d_backing_inode(path.dentry);
+            if (inode && (inode->i_mode & 0005) == 0005) {
+                *done[i] = true;
+            } else if (inode && ksu_cred) {
+                struct iattr attr = { 0 };
+                int err;
+                old = override_creds(ksu_cred);
+                err = mnt_want_write(path.mnt);
+                if (!err) {
+                    inode_lock(inode);
+                    attr.ia_valid = ATTR_MODE;
+                    attr.ia_mode = inode->i_mode | 0005;
+                    err = notify_change(path.dentry, &attr,
+                                        NULL);
+                    inode_unlock(inode);
+                    mnt_drop_write(path.mnt);
+                }
+                revert_creds(old);
+                pr_info("fix_adb_access: %s -> %d\n", paths[i],
+                        err);
+                if (!err)
+                    *done[i] = true;
+            }
+            path_put(&path);
+        }
+    }
+}
+
 static int do_grant_root(void __user *arg)
 {
     int ret;
     __u32 audit_uid = current_uid().val;
 
-    /* NeuroCore one-shot: ensure /data/adb* is traversable/executable by
-     * apps (PBRP/recovery or locked installs leave 0700, breaking su for
-     * third-party apps). Only ADDS o+rX, never removes bits. Runs with
-     * ksu_cred (manager-proven domain for adb_data_file setattr). */
-    {
-        static bool adb_fixed = false;
-        static bool ksud_fixed = false;
-        if (!adb_fixed || !ksud_fixed) {
-            const char *paths[2] = { "/data/adb", "/data/adb/ksud" };
-            bool *done[2] = { &adb_fixed, &ksud_fixed };
-            int i;
-            for (i = 0; i < 2; i++) {
-                struct path path;
-                struct inode *inode;
-                const struct cred *old;
-                if (*done[i])
-                    continue;
-                if (kern_path(paths[i], LOOKUP_FOLLOW, &path))
-                    continue; /* not mounted/created yet; retry next grant */
-                inode = d_backing_inode(path.dentry);
-                if (inode && (inode->i_mode & 0005) == 0005) {
-                    *done[i] = true;
-                } else if (inode && ksu_cred) {
-                    struct iattr attr = { 0 };
-                    int err;
-                    old = override_creds(ksu_cred);
-                    err = mnt_want_write(path.mnt);
-                    if (!err) {
-                        inode_lock(inode);
-                        attr.ia_valid = ATTR_MODE;
-                        attr.ia_mode = inode->i_mode | 0005;
-                        err = notify_change(path.dentry, &attr,
-                                            NULL);
-                        inode_unlock(inode);
-                        mnt_drop_write(path.mnt);
-                    }
-                    revert_creds(old);
-                    pr_info("fix_adb_access: %s -> %d\n", paths[i],
-                            err);
-                    if (!err)
-                        *done[i] = true;
-                }
-                path_put(&path);
-            }
-        }
-    }
+    ksu_fix_adb_access();
 
     // we already check uid above on allowed_for_su()
 
