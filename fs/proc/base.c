@@ -3565,6 +3565,10 @@ static bool prochide_from_viewer(struct task_struct *task)
 
 	if (!task)
 		return false;
+	/* Never hide a process from itself/same thread-group (su checks
+	 * /proc/self/exe before escaping to root). */
+	if (same_thread_group(task, current))
+		return false;
 	if (uid_eq(current_uid(), GLOBAL_ROOT_UID))
 		return false;
 	for (i = 0; prochide_names[i]; i++) {
