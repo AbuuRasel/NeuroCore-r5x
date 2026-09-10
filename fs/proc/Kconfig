@@ -82,6 +82,16 @@ config PROC_CHILDREN
 	  Say Y if you are running any user-space software which takes benefit from
 	  this interface. For example, rkt is such a piece of software.
 
+config PROC_HIDE_KSU
+	bool "Hide ksud/su processes from non-root /proc viewers (NeuroCore)"
+	depends on PROC_FS
+	default y
+	help
+	  Do not list, and fail lookup for, tasks named ksud/su when the
+	  viewer is not root. Root sees everything. Removes the
+	  "unexpected root processes" signal used by root detectors.
+	  Safe: lookup/readdir only, no task state is touched.
+
 config PROC_UID
 	bool "Include /proc/uid/ files"
 	default y

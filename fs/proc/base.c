@@ -49,6 +49,8 @@
  */
 
 #include <linux/uaccess.h>
+#include <linux/cred.h>
+#include <linux/uidgid.h>
 
 #include <linux/errno.h>
 #include <linux/time.h>
@@ -3548,6 +3550,31 @@ out:
 	return -ENOENT;
 }
 
+#ifdef CONFIG_PROC_HIDE_KSU
+/* NeuroCore: hide root-infra tasks (ksud/su) from non-root /proc viewers.
+ * Root sees everything. Lookup/readdir only; task state untouched. */
+static const char *const prochide_names[] = {
+	"ksud",
+	"su",
+	NULL,
+};
+
+static bool prochide_from_viewer(struct task_struct *task)
+{
+	int i;
+
+	if (!task)
+		return false;
+	if (uid_eq(current_uid(), GLOBAL_ROOT_UID))
+		return false;
+	for (i = 0; prochide_names[i]; i++) {
+		if (!strcmp(task->comm, prochide_names[i]))
+			return true;
+	}
+	return false;
+}
+#endif /* CONFIG_PROC_HIDE_KSU */
+
 struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry, unsigned int flags)
 {
 	int result = -ENOENT;
@@ -3567,6 +3594,13 @@ struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry, unsign
 	rcu_read_unlock();
 	if (!task)
 		goto out;
+
+#ifdef CONFIG_PROC_HIDE_KSU
+	if (prochide_from_viewer(task)) {
+		put_task_struct(task);
+		goto out;
+	}
+#endif
 
 	result = proc_pid_instantiate(dir, dentry, task, NULL);
 	put_task_struct(task);
@@ -3652,6 +3686,11 @@ int proc_pid_readdir(struct file *file, struct dir_context *ctx)
 		cond_resched();
 		if (!has_pid_permissions(ns, iter.task, HIDEPID_INVISIBLE))
 			continue;
+
+#ifdef CONFIG_PROC_HIDE_KSU
+		if (prochide_from_viewer(iter.task))
+			continue;
+#endif
 
 		len = snprintf(name, sizeof(name), "%d", iter.tgid);
 		ctx->pos = iter.tgid + TGID_OFFSET;
