@@ -10,6 +10,9 @@
 #include "runtime/ksud.h"
 #include "manager/manager_observer.h"
 #include "manager/throne_tracker.h"
+#include "selinux/sepolicy.h"
+#include "selinux/selinux.h"
+#include "ss/services.h"
 
 bool ksu_module_mounted __read_mostly = false;
 bool ksu_boot_completed __read_mostly = false;
@@ -69,6 +72,14 @@ void on_boot_completed(void)
     ksu_boot_completed = true;
     pr_info("on_boot_completed!\n");
     track_throne(true);
+    /* NeuroCore self-heal: if the boot-time KSU rules never landed
+     * (missed second_stage or a dropped stop_machine op), the live
+     * policy has no ksu domain and su can never be granted. Re-apply
+     * now while locking is safe; harmless if already applied. */
+    if (!ksu_exists(&policydb, KERNEL_SU_DOMAIN)) {
+        pr_warn("on_boot_completed: ksu rules missing, re-applying\n");
+        apply_kernelsu_rules();
+    }
     ksu_selinux_hide_drop_backup_if_unused();
     ksu_avc_spoof_late_init();
 }
