@@ -241,7 +241,7 @@ out_unlock:
     cpumask_t old_mask;
 	db = get_policydb();
 	rwlock_t *lock = ksu_get_policy_rwlock();
-	
+
 	if (!lock)
 		goto do_stop_machine;
 

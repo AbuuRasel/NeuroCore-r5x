@@ -15,23 +15,11 @@
 #include "selinux/selinux.h"
 #include "ss/services.h"
 
-/* TEMP mirror: shared in-memory narrative (see rules.c). */
-#ifndef KSU_BOOTLOG_DECL
-#define KSU_BOOTLOG_DECL
-extern void ksu_bootlog(const char *msg);
-#endif
-static void boot_mark(const char *msg)
-{
-	ksu_bootlog(msg);
-}
 
 bool ksu_module_mounted __read_mostly = false;
 bool ksu_boot_completed __read_mostly = false;
 
 extern void ksu_avc_spoof_late_init(void);
-
-/* TEMP narrative helper is in rules.c; mirrored tiny logger here. */
-extern void ksu_bootlog(const char *msg);
 
 /* NeuroCore: guarantee base rules exist at every post-load checkpoint.
  * Custom ROMs may load/reload policy after second_stage, wiping the
@@ -39,21 +27,13 @@ extern void ksu_bootlog(const char *msg);
  * after the policy is live, so re-apply if ksu is missing. */
 static void ksu_ensure_rules(const char *where)
 {
-    char msg[96];
-
-    if (ksu_exists(&policydb, KERNEL_SU_DOMAIN)) {
-        scnprintf(msg, sizeof(msg), "%s: ksu PRESENT, no heal needed",
-                  where);
-        ksu_bootlog(msg);
+    if (ksu_exists(&policydb, KERNEL_SU_DOMAIN))
         return;
-    }
     pr_warn("%s: ksu rules missing, re-applying\n", where);
-    scnprintf(msg, sizeof(msg), "%s: ksu MISSING, re-applying", where);
-    ksu_bootlog(msg);
     apply_kernelsu_rules();
     ksu_load_allow_list();
-    boot_mark(ksu_exists(&policydb, KERNEL_SU_DOMAIN) ?
-              "heal OK, ksu PRESENT" : "heal FAILED, ksu MISSING");
+    if (!ksu_exists(&policydb, KERNEL_SU_DOMAIN))
+        pr_err("%s: heal FAILED, ksu still missing\n", where);
 }
 
 void on_post_fs_data(void)
