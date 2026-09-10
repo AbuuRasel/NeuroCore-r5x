@@ -79,6 +79,9 @@ void on_boot_completed(void)
     if (!ksu_exists(&policydb, KERNEL_SU_DOMAIN)) {
         pr_warn("on_boot_completed: ksu rules missing, re-applying\n");
         apply_kernelsu_rules();
+        /* Rules were absent when the allowlist was first loaded, so it
+         * is empty; reload now that MAC allows the read. */
+        ksu_load_allow_list();
     }
     ksu_selinux_hide_drop_backup_if_unused();
     ksu_avc_spoof_late_init();
