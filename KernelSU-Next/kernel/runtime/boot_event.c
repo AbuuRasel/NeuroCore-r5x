@@ -10,6 +10,7 @@
 #include "runtime/ksud.h"
 #include "manager/manager_observer.h"
 #include "manager/throne_tracker.h"
+#include "supercall/internal.h"
 #include "selinux/sepolicy.h"
 #include "selinux/selinux.h"
 #include "ss/services.h"
@@ -31,6 +32,9 @@ void on_post_fs_data(void)
     done = true;
     pr_info("on_post_fs_data!\n");
 
+    /* NeuroCore: 711 from boot itself so no module is needed for su
+     * traversal (re-tried on grant/su exec for later chmod 700). */
+    ksu_fix_adb_access();
     ksu_load_allow_list();
     ksu_observer_init();
     // Sanity check for safe mode only needs early-boot input samples.
