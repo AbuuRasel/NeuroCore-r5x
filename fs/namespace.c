@@ -40,6 +40,19 @@ extern bool susfs_is_sdcard_android_data_decrypted;
 
 #define CL_COPY_MNT_NS BIT(25) /* used by copy_mnt_ns() */
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+/* NeuroCore: AUTO_ADD declarations, backported from susfs4ksu kernel-4.14 */
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+extern void susfs_auto_add_sus_ksu_default_mount(const char __user *to_pathname);
+bool susfs_is_auto_add_sus_ksu_default_mount_enabled = true;
+#endif
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+extern int susfs_auto_add_sus_bind_mount(const char *pathname, struct path *path_target);
+bool susfs_is_auto_add_sus_bind_mount_enabled = true;
+#endif
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
+extern void susfs_auto_add_try_umount_for_bind_mount(struct path *path);
+bool susfs_is_auto_add_try_umount_for_bind_mount_enabled = true;
+#endif
 
 /* Maximum number of mounts in a mount namespace */
 unsigned int sysctl_mount_max __read_mostly = 100000;
@@ -2586,6 +2599,26 @@ static int do_loopback(struct path *path, const char *old_name,
 		umount_tree(mnt, UMOUNT_SYNC);
 		unlock_mount_hash();
 	}
+#if defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT) || defined(CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT)
+	/* Check if bind mounted path should be hidden and umounted automatically.
+	 * And we target only process with ksu domain. */
+	if (susfs_is_current_ksu_domain()) {
+#if defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT)
+		if (susfs_is_auto_add_sus_bind_mount_enabled &&
+				susfs_auto_add_sus_bind_mount(old_name, &old_path)) {
+			goto orig_flow;
+		}
+#endif
+#if defined(CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT)
+		if (susfs_is_auto_add_try_umount_for_bind_mount_enabled) {
+			susfs_auto_add_try_umount_for_bind_mount(path);
+		}
+#endif
+	}
+#if defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT)
+orig_flow:
+#endif
+#endif // #if defined(CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT) || defined(CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT)
 
 out2:
 	unlock_mount(mp);
@@ -3200,6 +3233,15 @@ long do_mount(const char *dev_name, const char __user *dir_name,
 	else
 		retval = do_new_mount(&path, type_page, sb_flags, mnt_flags,
 				      dev_name, data_page);
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+	/* For both Legacy and Magic Mount KernelSU */
+	if (!retval && susfs_is_auto_add_sus_ksu_default_mount_enabled &&
+			(!(flags & (MS_REMOUNT | MS_BIND | MS_SHARED | MS_PRIVATE | MS_SLAVE | MS_UNBINDABLE)))) {
+		if (susfs_is_current_ksu_domain()) {
+			susfs_auto_add_sus_ksu_default_mount(dir_name);
+		}
+	}
+#endif
 dput_out:
 	path_put(&path);
 	return retval;

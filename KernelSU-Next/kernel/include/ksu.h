@@ -40,8 +40,9 @@ static inline int endswith(const char *s, const char *t)
 	return strcmp(s + slen - tlen, t);
 }
 
-/* 4.14 has no untagged_addr; identity is safe here. */
-#ifndef untagged_addr
+/* 4.14 arm64 already provides untagged_addr() in asm/uaccess.h (sign_extend64);
+ * only provide a generic fallback on arches without it. */
+#if !defined(untagged_addr) && !defined(CONFIG_ARM64)
 #define untagged_addr(addr)	((addr) & ~(0xffUL << 56))
 #endif
 #ifndef copy_from_user_nofault

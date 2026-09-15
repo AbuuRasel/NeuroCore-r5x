@@ -102,7 +102,9 @@ static inline unsigned long __range_ok(unsigned long addr, unsigned long size)
  * up with a tagged userland pointer. Clear the tag to get a sane pointer to
  * pass on to access_ok(), for instance.
  */
+#ifndef untagged_addr
 #define untagged_addr(addr)		sign_extend64(addr, 55)
+#endif
 
 #define access_ok(type, addr, size)	__range_ok((unsigned long)(addr), size)
 #define user_addr_max			get_fs

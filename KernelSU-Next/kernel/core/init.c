@@ -24,6 +24,9 @@
 #include "feature/adb_root.h"
 #include "feature/selinux_hide.h"
 #include "feature/sulog.h"
+#ifdef CONFIG_KSU_SUSFS
+#include <linux/susfs.h>
+#endif
 #include "infra/symbol_resolver.h"
 
 #if defined(__x86_64__)
@@ -91,6 +94,9 @@ module_param_named(bundled, ksu_bundled, bool, 0);
 
 int __init kernelsu_init(void)
 {
+#ifdef CONFIG_KSU_SUSFS
+	susfs_init();
+#endif
 #if defined(__x86_64__)
     // If the kernel has the hardening patch, X86_FEATURE_INDIRECT_SAFE must be set 
     if (!boot_cpu_has(X86_FEATURE_INDIRECT_SAFE)) {

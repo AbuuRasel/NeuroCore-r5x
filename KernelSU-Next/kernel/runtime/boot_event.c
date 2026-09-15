@@ -36,6 +36,10 @@ static void ksu_ensure_rules(const char *where)
         pr_err("%s: heal FAILED, ksu still missing\n", where);
 }
 
+#ifdef CONFIG_KSU_SUSFS
+static void susfs_auto_add_toggles_init(void);
+#endif
+
 void on_post_fs_data(void)
 {
     static bool done = false;
@@ -54,7 +58,37 @@ void on_post_fs_data(void)
     // Sanity check for safe mode only needs early-boot input samples.
     ksu_stop_input_hook_runtime();
     ksu_selinux_hide_handle_post_fs_data();
+#ifdef CONFIG_KSU_SUSFS
+    susfs_auto_add_toggles_init();
+#endif
 }
+
+#ifdef CONFIG_KSU_SUSFS
+/* NeuroCore: mirrors upstream susfs_on_post_fs_data; per-feature opt-out
+ * via /data/adb flag files (values from upstream susfs4ksu kernel-4.14). */
+extern bool susfs_is_auto_add_sus_bind_mount_enabled;
+extern bool susfs_is_auto_add_sus_ksu_default_mount_enabled;
+extern bool susfs_is_auto_add_try_umount_for_bind_mount_enabled;
+static void susfs_auto_add_toggles_init(void)
+{
+    struct path path;
+    if (!kern_path("/data/adb/susfs_no_auto_add_sus_bind_mount", 0, &path)) {
+        susfs_is_auto_add_sus_bind_mount_enabled = false;
+        path_put(&path);
+    }
+    pr_info("susfs_is_auto_add_sus_bind_mount_enabled: %d\n", susfs_is_auto_add_sus_bind_mount_enabled);
+    if (!kern_path("/data/adb/susfs_no_auto_add_sus_ksu_default_mount", 0, &path)) {
+        susfs_is_auto_add_sus_ksu_default_mount_enabled = false;
+        path_put(&path);
+    }
+    pr_info("susfs_is_auto_add_sus_ksu_default_mount_enabled: %d\n", susfs_is_auto_add_sus_ksu_default_mount_enabled);
+    if (!kern_path("/data/adb/susfs_no_auto_add_try_umount_for_bind_mount", 0, &path)) {
+        susfs_is_auto_add_try_umount_for_bind_mount_enabled = false;
+        path_put(&path);
+    }
+    pr_info("susfs_is_auto_add_try_umount_for_bind_mount_enabled: %d\n", susfs_is_auto_add_try_umount_for_bind_mount_enabled);
+}
+#endif
 
 extern void ext4_unregister_sysfs(struct super_block *sb);
 

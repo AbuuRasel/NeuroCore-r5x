@@ -221,6 +221,12 @@ void susfs_add_sus_path_loop(void __user **user_info);
 /* sus_mount */
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 void susfs_set_hide_sus_mnts_for_non_su_procs(void __user **user_info);
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+int susfs_auto_add_sus_bind_mount(const char *pathname, struct path *path_target);
+#endif // #ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+void susfs_auto_add_sus_ksu_default_mount(const char __user *to_pathname);
+#endif // #ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 
 /* sus_kstat */
@@ -234,6 +240,9 @@ void susfs_show_map_vma_spoofer(struct inode *inode, dev_t *out_dev, unsigned lo
 #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
 void susfs_add_try_umount(void __user **user_info);
 void susfs_try_umount(uid_t uid);
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
+void susfs_auto_add_try_umount_for_bind_mount(struct path *path);
+#endif // #ifdef CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
 #endif // #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
 
 /* spoof_uname */

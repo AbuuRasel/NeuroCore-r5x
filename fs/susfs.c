@@ -260,6 +260,75 @@ out_copy_to_user:
 	}
 	SUSFS_LOGI("CMD_SUSFS_hide_sus_mnts_for_non_su_procs -> ret: %d\n", info.err);
 }
+/* NeuroCore: AUTO_ADD backported from susfs4ksu kernel-4.14 (v1.5.5),
+ * adapted to v2.2.0 conventions (AS_FLAGS_* + set_bit/test_bit).
+ * Values match upstream: DEFAULT_SUS_MNT_GROUP_ID=1000. */
+#ifndef DEFAULT_SUS_MNT_GROUP_ID
+#define DEFAULT_SUS_MNT_GROUP_ID 1000 /* used by mount->mnt_group_id */
+#endif
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+int susfs_auto_add_sus_bind_mount(const char *pathname, struct path *path_target) {
+	struct mount *mnt;
+	struct inode *inode;
+
+	mnt = real_mount(path_target->mnt);
+	if (mnt->mnt_group_id > 0 && /* 0 means no peer group */
+		mnt->mnt_group_id < DEFAULT_SUS_MNT_GROUP_ID) {
+		SUSFS_LOGE("skip setting SUS_MOUNT inode state for path '%s' since its source mount has a legit peer group id\n", pathname);
+		/* return 0 here as we still want it to be added to try_umount list */
+		return 0;
+	}
+	inode = path_target->dentry->d_inode;
+	if (!inode) return 1;
+	if (!test_bit(AS_FLAGS_SUS_MOUNT, &inode->i_state)) {
+		set_bit(AS_FLAGS_SUS_MOUNT, &inode->i_state);
+		SUSFS_LOGI("set SUS_MOUNT inode state for source bind mount path '%s'\n", pathname);
+	}
+	return 0;
+}
+#endif // #ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+void susfs_auto_add_sus_ksu_default_mount(const char __user *to_pathname) {
+	char *pathname = NULL;
+	struct path path;
+	struct inode *inode;
+
+	pathname = kmalloc(SUSFS_MAX_LEN_PATHNAME, GFP_KERNEL);
+	if (!pathname) {
+		SUSFS_LOGE("no enough memory\n");
+		return;
+	}
+	/* Here we need to re-retrieve the struct path as we want the new struct path, not the old one */
+	if (strncpy_from_user(pathname, to_pathname, SUSFS_MAX_LEN_PATHNAME-1) < 0) {
+		SUSFS_LOGE("strncpy_from_user()\n");
+		goto out_free_pathname;
+	}
+	if ((!strncmp(pathname, "/data/adb/modules", 17) ||
+		 !strncmp(pathname, "/debug_ramdisk", 14) ||
+		 !strncmp(pathname, "/system", 7) ||
+		 !strncmp(pathname, "/system_ext", 11) ||
+		 !strncmp(pathname, "/vendor", 7) ||
+		 !strncmp(pathname, "/product", 8) ||
+		 !strncmp(pathname, "/odm", 4)) &&
+		 !kern_path(pathname, LOOKUP_FOLLOW, &path)) {
+		goto set_inode_sus_mount;
+	}
+	goto out_free_pathname;
+set_inode_sus_mount:
+	inode = path.dentry->d_inode;
+	if (!inode) {
+		goto out_path_put;
+	}
+	if (!test_bit(AS_FLAGS_SUS_MOUNT, &inode->i_state)) {
+		set_bit(AS_FLAGS_SUS_MOUNT, &inode->i_state);
+		SUSFS_LOGI("set SUS_MOUNT inode state for default KSU mount path '%s'\n", pathname);
+	}
+out_path_put:
+	path_put(&path);
+out_free_pathname:
+	kfree(pathname);
+}
+#endif // #ifdef CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 
 /* sus_kstat */
@@ -650,6 +719,61 @@ void susfs_try_umount(uid_t uid) {
 		try_umount(cursor->info.target_pathname, cursor->info.mnt_mode);
 	}
 }
+#ifdef CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
+/* NeuroCore: backported from susfs4ksu kernel-4.14 (v1.5.5),
+ * adapted to v2.2.0 (mutex instead of spinlock, AS_FLAGS_SUS_KSTAT). */
+void susfs_auto_add_try_umount_for_bind_mount(struct path *path) {
+	struct st_susfs_try_umount_list *cursor = NULL, *temp = NULL;
+	struct st_susfs_try_umount_list *new_list = NULL;
+	char *pathname = NULL, *dpath = NULL;
+
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+	if (test_bit(AS_FLAGS_SUS_KSTAT, &path->dentry->d_inode->i_state)) {
+		SUSFS_LOGI("skip adding path to try_umount list as its inode is flagged AS_FLAGS_SUS_KSTAT already\n");
+		return;
+	}
+#endif
+
+	pathname = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!pathname) {
+		SUSFS_LOGE("no enough memory\n");
+		return;
+	}
+
+	dpath = d_path(path, pathname, PAGE_SIZE);
+	if (!dpath) {
+		SUSFS_LOGE("dpath is NULL\n");
+		goto out_free_pathname;
+	}
+
+	list_for_each_entry_safe(cursor, temp, &LH_TRY_UMOUNT_PATH, list) {
+		if (unlikely(!strcmp(dpath, cursor->info.target_pathname))) {
+			SUSFS_LOGE("target_pathname: '%s', ino: %lu, is already created in LH_TRY_UMOUNT_PATH\n",
+							dpath, path->dentry->d_inode->i_ino);
+			goto out_free_pathname;
+		}
+	}
+
+	new_list = kmalloc(sizeof(struct st_susfs_try_umount_list), GFP_KERNEL);
+	if (!new_list) {
+		SUSFS_LOGE("no enough memory\n");
+		goto out_free_pathname;
+	}
+
+	strncpy(new_list->info.target_pathname, dpath, SUSFS_MAX_LEN_PATHNAME-1);
+
+	new_list->info.mnt_mode = TRY_UMOUNT_DETACH;
+
+	INIT_LIST_HEAD(&new_list->list);
+	mutex_lock(&susfs_mutex_lock_try_umount);
+	list_add_tail(&new_list->list, &LH_TRY_UMOUNT_PATH);
+	mutex_unlock(&susfs_mutex_lock_try_umount);
+	SUSFS_LOGI("target_pathname: '%s', ino: %lu, mnt_mode: %d, is successfully added to LH_TRY_UMOUNT_PATH\n",
+					new_list->info.target_pathname, path->dentry->d_inode->i_ino, new_list->info.mnt_mode);
+out_free_pathname:
+	kfree(pathname);
+}
+#endif // #ifdef CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
 #endif // #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
 
 /* spoof_uname */
@@ -1575,12 +1699,21 @@ static void susfs_run_extra_works(struct work_struct *work) {
 }
 
 /* susfs_init */
+#ifdef CONFIG_KSU_SUSFS_SUS_SU
+extern int sus_su_fifo_init(int *maj_dev_num, char *drv_path);
+static int sus_su_maj_dev_num = -1;
+static char sus_su_drv_path[256] = {0};
+#endif
 void susfs_init(void) {
 #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 	susfs_my_uname_init();
 #endif
 	SUSFS_LOGI("Initializing susfs_extra_works\n");
 	INIT_WORK(&susfs_extra_works, susfs_run_extra_works);
+#ifdef CONFIG_KSU_SUSFS_SUS_SU
+	if (sus_su_fifo_init(&sus_su_maj_dev_num, sus_su_drv_path))
+		SUSFS_LOGE("sus_su_fifo_init failed\n");
+#endif
 	SUSFS_LOGI("susfs is initialized! version: " SUSFS_VERSION " \n");
 }
 
