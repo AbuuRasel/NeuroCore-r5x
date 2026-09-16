@@ -136,4 +136,35 @@ config GENERIC_IRQ_DEBUGFS
 
 	  If you don't know what to do here, say N.
 
+config IRQ_SBALANCE
+	bool "SBalance IRQ balancer"
+	depends on SMP
+	default n
+	help
+	  Simple IRQ balancer (Sultan Alsawaf SBalance, 4.14 backport):
+	  polls periodically and moves IRQs from the most
+	  interrupt-heavy CPU to the least interrupt-heavy CPUs.
+	  Nullifier parity feature for trinket.
+
+if IRQ_SBALANCE
+config IRQ_SBALANCE_POLL_MSEC
+	int "SBalance polling interval in milliseconds"
+	default 5000
+	help
+	  Perform IRQ balancing every X milliseconds.
+
+config IRQ_SBALANCE_THRESH
+	int "SBalance balance threshold in number of interrupts"
+	default 1024
+	help
+	  Minimum gap of scaled new interrupts between heaviest
+	  and least-heavy CPU required to trigger balancing.
+
+config SBALANCE_EXCLUDE_CPUS
+	string "CPUs to exclude from SBalance"
+	help
+	  Comma-separated list of CPUs to exclude from IRQ balancing.
+
+endif
+
 endmenu

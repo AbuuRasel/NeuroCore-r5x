@@ -19,6 +19,11 @@
 
 #include "internals.h"
 
+#ifdef CONFIG_IRQ_SBALANCE
+void sbalance_desc_add(struct irq_desc *desc);
+void sbalance_desc_del(struct irq_desc *desc);
+#endif
+
 /*
  * lockdep: we want to handle all irq_desc locks as a single lock-class:
  */
@@ -389,6 +394,9 @@ static struct irq_desc *alloc_desc(int irq, int node, unsigned int flags,
 	init_rcu_head(&desc->rcu);
 
 	desc_set_defaults(irq, desc, node, affinity, owner);
+#ifdef CONFIG_IRQ_SBALANCE
+	sbalance_desc_add(desc);
+#endif
 	irqd_set(&desc->irq_data, flags);
 	kobject_init(&desc->kobj, &irq_kobj_type);
 
@@ -413,6 +421,9 @@ static void irq_kobj_release(struct kobject *kobj)
 static void delayed_free_desc(struct rcu_head *rhp)
 {
 	struct irq_desc *desc = container_of(rhp, struct irq_desc, rcu);
+#ifdef CONFIG_IRQ_SBALANCE
+	sbalance_desc_del(desc);
+#endif
 
 	kobject_put(&desc->kobj);
 }
