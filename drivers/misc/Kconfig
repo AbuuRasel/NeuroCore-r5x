@@ -601,6 +601,14 @@ config SOUND_CONTROL
 	  digital volumes at /sys/kernel/sound_control. Applies a +6dB
 	  in-call mic boost by default (reversible via sysfs).
 
+config BATTERY_SAVER
+	bool "Battery saver mode for kernelspace (Nullifier parity)"
+	help
+	  Kernelspace battery saver toggle; suppresses CPU/DDR boosting
+	  while enabled. Toggle via /sys/module/battery_saver/parameters/enabled.
+
+	  If in doubt, say N.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
