@@ -574,7 +574,9 @@ static inline unsigned int sched_get_cpu_util(int cpu)
 #ifdef CONFIG_SCHED_WALT
 #ifdef CONFIG_PRODUCT_REALME_TRINKET
 //cuixiaogang@swdp.shanghai, 2018/3/18, export some symbol
-extern int sched_boost(void);
+//NOTE(NeuroCore-sm8150sync): sched_boost() lives as static inline
+//in kernel/sched/sched.h; no global definition exists, so the
+//extern declaration is removed to fix WALT builds.
 extern int sched_set_updown_migrate(unsigned int *up_pct, unsigned int *down_pct);
 extern int sched_get_updown_migrate(unsigned int *up_pct, unsigned int *down_pct);
 void sched_boost_disable_all(void);
