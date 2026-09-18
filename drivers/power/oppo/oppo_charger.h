@@ -140,6 +140,7 @@ typedef enum {
         CHG_STOP_VOTER__VBAT_TOO_HIGH                      =        (1 << 2),
         CHG_STOP_VOTER__MAX_CHGING_TIME                    =        (1 << 3),
         CHG_STOP_VOTER__FULL                               =        (1 << 4),
+        CHG_STOP_VOTER__CHARGE_LIMIT                       =        (1 << 5),
 }OPPO_CHG_STOP_VOTER;
 
 typedef enum {

@@ -2814,6 +2814,7 @@ static void oppo_chg_voter_charging_start(struct oppo_chg_chip *chip, OPPO_CHG_S
         case CHG_STOP_VOTER__BATTTEMP_ABNORMAL:
         case CHG_STOP_VOTER__VBAT_TOO_HIGH:
         case CHG_STOP_VOTER__MAX_CHGING_TIME:
+        case CHG_STOP_VOTER__CHARGE_LIMIT:
                 chip->charging_state = CHARGING_STATUS_CCCV;
                 break;
         default:
@@ -2855,6 +2856,10 @@ static void oppo_chg_voter_charging_stop(struct oppo_chg_chip *chip, OPPO_CHG_ST
         case CHG_STOP_VOTER__MAX_CHGING_TIME:
                 chip->charging_state = CHARGING_STATUS_FAIL;
                 oppo_chg_turn_off_charging(chip);
+                break;
+        case CHG_STOP_VOTER__CHARGE_LIMIT:
+                chip->charging_state = CHARGING_STATUS_FULL;
+                chip->chg_ops->charging_disable();
                 break;
         default:
                 break;
@@ -5086,10 +5091,50 @@ static bool oppo_chg_check_vbatt_is_full_by_sw(struct oppo_chg_chip *chip)
 
 #define FULL_DELAY_COUNTS	4
 #define DOD0_COUNTS		(8 * 60 / 5)
+
+/* NeuroCore charge limit: stop at chg_limit_stop %, resume at
+ * chg_limit_resume %. Tunable:
+ *   /sys/module/oppo_charger/parameters/chg_limit_stop (0 = disabled)
+ *   /sys/module/oppo_charger/parameters/chg_limit_resume */
+static int chg_limit_stop = 90;
+static int chg_limit_resume = 87;
+module_param(chg_limit_stop, int, 0644);
+module_param(chg_limit_resume, int, 0644);
+
+static void oppo_chg_check_charge_limit(struct oppo_chg_chip *chip)
+{
+	bool limited = !!(chip->stop_voter & CHG_STOP_VOTER__CHARGE_LIMIT);
+
+	if (chg_limit_stop <= 0 || chg_limit_stop > 100)
+		goto release;
+	if (chg_limit_resume < 0 || chg_limit_resume >= chg_limit_stop)
+		chg_limit_resume = chg_limit_stop - 3;
+	if (!chip->authenticate)
+		goto release;
+
+	if (!limited && chip->ui_soc >= chg_limit_stop) {
+		charger_xlog_printk(CHG_LOG_CRTI,
+			"[BATTERY] charge limit %d%% reached (soc=%d), stopping\n",
+			chg_limit_stop, chip->ui_soc);
+		oppo_chg_voter_charging_stop(chip, CHG_STOP_VOTER__CHARGE_LIMIT);
+	} else if (limited && chip->ui_soc <= chg_limit_resume) {
+		charger_xlog_printk(CHG_LOG_CRTI,
+			"[BATTERY] charge limit resume %d%% (soc=%d), restarting\n",
+			chg_limit_resume, chip->ui_soc);
+		oppo_chg_voter_charging_start(chip, CHG_STOP_VOTER__CHARGE_LIMIT);
+	}
+	return;
+release:
+	if (limited)
+		oppo_chg_voter_charging_start(chip, CHG_STOP_VOTER__CHARGE_LIMIT);
+}
+
 static void oppo_chg_check_status_full(struct oppo_chg_chip *chip)
 {
 	int is_batt_full = 0;
 	static int fastchg_present_wait_count = 0;
+
+	oppo_chg_check_charge_limit(chip);
 
 	if (chip->chg_ctrl_by_vooc) {
 		if (oppo_vooc_get_fastchg_ing() == true && oppo_vooc_get_fast_chg_type() != CHARGER_SUBTYPE_FASTCHG_VOOC)

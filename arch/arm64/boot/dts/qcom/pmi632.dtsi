@@ -385,7 +385,9 @@
 			//qcom,suspend_after_full;
 			qcom,check_batt_full_by_sw;
 			//qcom,external_gauge;
-			qcom,chg_ctrl_by_lcd;
+			/* NeuroCore max-speed: no screen-on derate (stays 2A with
+			 * display on; battery warm guard still throttles). */
+			//qcom,chg_ctrl_by_lcd;
 			qcom,chg_ctrl_by_camera;
 			qcom,chg_ctrl_by_calling;
 			qcom,sw_vfloat_over_protect_enable;
