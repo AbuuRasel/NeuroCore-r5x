@@ -1057,6 +1057,42 @@ enum {	/* oppo gesture type */
 static struct wake_lock gestrue_wakelock;
 #endif
 
+#if WAKEUP_GESTURE
+/* NeuroCore DT2W: double-tap-to-wake, off by default for battery/pocket
+ * safety. Enable: echo 1 > /sys/module/nt36xxx/parameters/dt2w
+ * When driven by dt2w, only the double-tap gesture wakes the device;
+ * the (already existing) proc gesture node still enables the full set. */
+static int dt2w_enable;
+static int dt2w_only;
+
+static int dt2w_param_set(const char *buf, const struct kernel_param *kp)
+{
+	int val, ret;
+
+	ret = kstrtoint(buf, 10, &val);
+	if (ret < 0)
+		return ret;
+	val = !!val;
+	dt2w_enable = val;
+	dt2w_only = val;
+	if (ts)
+		ts->gesture_enable = val;
+	NVT_LOG("DT2W %s\n", val ? "enabled (double-tap only)" : "disabled");
+	return 0;
+}
+
+static int dt2w_param_get(char *buf, const struct kernel_param *kp)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", dt2w_enable);
+}
+
+static const struct kernel_param_ops dt2w_param_ops = {
+	.set = dt2w_param_set,
+	.get = dt2w_param_get,
+};
+module_param_cb(dt2w, &dt2w_param_ops, NULL, 0644);
+#endif
+
 /*******************************************************
 Description:
 	Novatek touchscreen wake up gesture key report function.
@@ -1234,7 +1270,11 @@ void nvt_ts_wakeup_gesture_report(uint8_t gesture_id, uint8_t *data, struct gest
 			gesture->Point_3rd.x, gesture->Point_3rd.y,
 			gesture->Point_4th.x, gesture->Point_4th.y);
 
-	if (gesture->gesture_type != UnkownGesture) {
+	if (gesture->gesture_type != UnkownGesture
+#if WAKEUP_GESTURE
+	    && (!dt2w_only || gesture->gesture_type == DouTap)
+#endif
+	    ) {
 		keycode = KEY_WAKEUP;
 
 		input_report_key(ts->input_dev, keycode, 1);

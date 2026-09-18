@@ -376,12 +376,52 @@ static ssize_t qpnp_vib_store_vmax(struct device *dev,
 	return count;
 }
 
+/* NeuroCore vibrator control: percentage strength (0-100, default 100)
+ * scaling the DT default voltage between VMIN and the DT value.
+ * Node: /sys/class/leds/vibrator/strength */
+static int vib_default_uV;
+static int vib_strength_pct = 100;
+
+static ssize_t qpnp_vib_show_strength(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", vib_strength_pct);
+}
+
+static ssize_t qpnp_vib_store_strength(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct led_classdev *cdev = dev_get_drvdata(dev);
+	struct vib_ldo_chip *chip = container_of(cdev, struct vib_ldo_chip,
+						cdev);
+	int pct, ret, new_uV;
+
+	ret = kstrtoint(buf, 10, &pct);
+	if (ret < 0)
+		return ret;
+
+	pct = clamp(pct, 0, 100);
+
+	mutex_lock(&chip->lock);
+	vib_strength_pct = pct;
+	new_uV = QPNP_VIB_LDO_VMIN_UV +
+		((vib_default_uV - QPNP_VIB_LDO_VMIN_UV) * pct) / 100;
+	new_uV = min(new_uV, QPNP_VIB_LDO_VMAX_UV);
+	new_uV = max(new_uV, QPNP_VIB_LDO_VMIN_UV);
+	chip->vmax_uV = new_uV;
+	if (chip->vib_enabled)
+		qpnp_vib_ldo_set_voltage(chip, new_uV);
+	mutex_unlock(&chip->lock);
+	return count;
+}
+
 static struct device_attribute qpnp_vib_attrs[] = {
 	__ATTR(state, 0664, qpnp_vib_show_state, qpnp_vib_store_state),
 	__ATTR(duration, 0664, qpnp_vib_show_duration, qpnp_vib_store_duration),
 	__ATTR(activate, 0664, qpnp_vib_show_activate, qpnp_vib_store_activate),
 	__ATTR(vmax_mv, 0664, qpnp_vib_show_vmax, qpnp_vib_store_vmax),
         __ATTR(vtg_level, 0664, qpnp_vib_show_vmax, qpnp_vib_store_vmax),
+	__ATTR(strength, 0664, qpnp_vib_show_strength, qpnp_vib_store_strength),
 };
 
 static int qpnp_vib_parse_dt(struct device *dev, struct vib_ldo_chip *chip)
@@ -475,9 +515,11 @@ static int qpnp_vibrator_ldo_probe(struct platform_device *pdev)
 
 	ret = qpnp_vib_parse_dt(&pdev->dev, chip);
 	if (ret < 0) {
-		pr_err("couldn't parse device tree, ret=%d\n", ret);
+		pr_err("couldn't parse device tree, ret=%d\n",
+			ret);
 		return ret;
 	}
+	vib_default_uV = chip->vmax_uV;
 
 	chip->base = (uint16_t)base;
 	chip->vib_play_ms = QPNP_VIB_PLAY_MS;
