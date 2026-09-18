@@ -80,6 +80,25 @@ static char __user *empty_user_path(void)
 
 static const char su_path[] = SU_PATH;
 
+/* NeuroCore: also intercept direct execs of the KSU su entry points so su
+ * keeps working with /data/adb locked down to 0700. The hook re-opens the
+ * daemon with ksu_cred and execs it via execveat, so the caller never needs
+ * DAC traversal of /data/adb. Non-allowlisted callers still fall through to
+ * the original syscall (EACCES under 0700), so detectors learn nothing. */
+#define KSU_SU_BIN_PATH "/data/adb/ksu/bin/su"
+static const char ksu_su_bin_path[] = KSU_SU_BIN_PATH;
+
+static bool ksu_is_su_exec_path(const char *path)
+{
+	if (!memcmp(path, su_path, sizeof(su_path)))
+		return true;
+	if (!memcmp(path, ksu_su_bin_path, sizeof(ksu_su_bin_path)))
+		return true;
+	if (!memcmp(path, KSUD_PATH, sizeof(KSUD_PATH)))
+		return true;
+	return false;
+}
+
 static bool is_ksud_exists()
 {
 	struct path path;
@@ -103,11 +122,11 @@ long ksu_handle_faccessat_sucompat(int orig_nr, struct pt_regs *regs)
 
 	filename_user = (const char __user **)&PT_REGS_PARM2(regs);
 
-	char path[sizeof(su_path) + 1];
+	char path[32];
 	memset(path, 0, sizeof(path));
 	strncpy_from_user_nofault(path, *filename_user, sizeof(path));
 
-	if (unlikely(!memcmp(path, su_path, sizeof(su_path)))) {
+	if (unlikely(ksu_is_su_exec_path(path))) {
 		old_cred = override_creds(ksu_cred);
 		if (is_ksud_exists()) {
 			ksu_compat_sulog('a');
@@ -139,11 +158,11 @@ long ksu_handle_stat_sucompat(int orig_nr, struct pt_regs *regs)
 
 	filename_user = (const char __user **)&PT_REGS_PARM2(regs);
 
-	char path[sizeof(su_path) + 1];
+	char path[32];
 	memset(path, 0, sizeof(path));
 	strncpy_from_user_nofault(path, *filename_user, sizeof(path));
 
-	if (unlikely(!memcmp(path, su_path, sizeof(su_path)))) {
+	if (unlikely(ksu_is_su_exec_path(path))) {
 		old_cred = override_creds(ksu_cred);
 		if (is_ksud_exists()) {
 			ksu_compat_sulog('s');
@@ -168,7 +187,7 @@ long ksu_handle_execve_sucompat(const char __user **filename_user, int orig_nr, 
 	const char __user *fn;
 	const char __user *const __user *argv_user = (const char __user *const __user *)PT_REGS_PARM2(regs);
 	struct ksu_sulog_pending_event *pending_sucompat = NULL;
-	char path[sizeof(su_path) + 1];
+	char path[32];
 	long ret, orig_regs[5];
 	unsigned long addr;
 	int tmp_fd;
@@ -191,7 +210,7 @@ long ksu_handle_execve_sucompat(const char __user **filename_user, int orig_nr, 
 		goto do_orig_execve;
 	}
 
-	if (likely(memcmp(path, su_path, sizeof(su_path))))
+	if (likely(!ksu_is_su_exec_path(path)))
 		goto do_orig_execve;
 
 	ksu_compat_sulog('x');
@@ -228,9 +247,9 @@ long ksu_handle_execve_sucompat(const char __user **filename_user, int orig_nr, 
 	regs->__PT_PARM2_REG = empty_user_path();
 	regs->__PT_PARM1_REG = tmp_fd;
 
-	/* Self-heal a manual chmod 0700 on /data/adb* (breaks su via DAC
-	 * before SELinux is consulted). Cheap re-verify per su exec. */
-	ksu_fix_adb_access();
+	/* Keep /data/adb* at 0700 (su works via this hook with ksu_cred, so no
+	 * DAC traversal is needed). Re-enforce on every su exec. */
+	ksu_enforce_adb_700();
 	ret = escape_with_root_profile();
 	if (ret) {
 		pr_err("escape_with_root_profile failed: %ld\n", ret);

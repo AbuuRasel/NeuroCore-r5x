@@ -1179,7 +1179,9 @@ extern ssize_t (*write_op[])(struct file *, char *, size_t);
 extern struct file_operations sel_handle_status_ops;
 
 static DEFINE_MUTEX(ksu_hide414_mutex);
-static bool ksu_hide414_enabled __read_mostly = false;
+/* NeuroCore default-ON: Hide SELinux modification ships enabled (manager
+ * shows ON on fresh installs). Explicit set(0) still disables. */
+static bool ksu_hide414_enabled __read_mostly = true;
 static bool ksu_hide414_running __read_mostly = false;
 
 struct ksu_hide414_backup {
@@ -2031,6 +2033,16 @@ void __init ksu_selinux_hide_init(void)
 	if (ksu_late_loaded)
 		ksu_hide414_init_fake_status();
 	ksu_hide414_hook_status();
+	/* NeuroCore default-ON for late (LKM) loads: on_post_fs_data() already
+	 * ran, so attempt the enable now (backup exists this late in boot). */
+	if (ksu_late_loaded) {
+		mutex_lock(&ksu_hide414_mutex);
+		if (ksu_hide414_enabled && !ksu_hide414_running) {
+			if (!ksu_hide414_enable())
+				ksu_hide414_running = true;
+		}
+		mutex_unlock(&ksu_hide414_mutex);
+	}
 }
 
 void __exit ksu_selinux_hide_exit(void)
@@ -2066,5 +2078,17 @@ void ksu_selinux_hide_handle_post_fs_data(void)
 {
 	if (!ksu_hide414_fake_status)
 		pr_err("selinux_hide414: fake status missing after post-fs-data\n");
+	/* NeuroCore default-ON: on_post_fs_data() re-applies KSU rules first,
+	 * so the pristine backup is guaranteed here. Start the hooks now when
+	 * enabled (default) and not already running; an explicit set(0) from
+	 * the manager/ksud still wins (it runs after / overrides this). */
+	mutex_lock(&ksu_hide414_mutex);
+	if (ksu_hide414_enabled && !ksu_hide414_running) {
+		if (!ksu_hide414_enable())
+			ksu_hide414_running = true;
+		else
+			pr_warn("selinux_hide414: default-ON enable deferred (backup not ready?)\n");
+	}
+	mutex_unlock(&ksu_hide414_mutex);
 }
 #endif
