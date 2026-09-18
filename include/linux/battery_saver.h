@@ -10,7 +10,7 @@
 
 #ifdef CONFIG_BATTERY_SAVER
 bool is_battery_saver_on(void);
-void enable_battery_saver(bool status);
+void update_battery_saver(bool status);
 #else
 static inline bool is_battery_saver_on()
 {

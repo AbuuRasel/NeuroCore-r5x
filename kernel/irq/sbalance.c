@@ -62,7 +62,8 @@ void sbalance_desc_add(struct irq_desc *desc)
 {
 	struct bal_irq *bi;
 
-	bi = kmalloc(sizeof(*bi), GFP_KERNEL);
+	/* Atomic: IRQ descs can be allocated in non-sleepable context. */
+	bi = kmalloc(sizeof(*bi), GFP_ATOMIC);
 	if (WARN_ON(!bi))
 		return;
 
@@ -136,6 +137,11 @@ static int move_irq_to_cpu(struct bal_irq *bi, int cpu)
 	struct irq_desc *desc = bi->desc;
 	int prev_cpu, ret;
 
+	/* Never park an IRQ on an offlined CPU: it would go undeliverable
+	 * and the owner (modem/UFS/IPA) would SSR-timeout -> panic -> reboot. */
+	if (unlikely(!cpu_online(cpu) || !cpu_active(cpu)))
+		return -ENODEV;
+
 	/* Set the affinity if it wasn't changed since we looked at it */
 	raw_spin_lock_irq(&desc->lock);
 	prev_cpu = cpumask_first(desc->irq_common_data.affinity);
@@ -173,6 +179,9 @@ static bool find_min_bd(const cpumask_t *mask, unsigned int max_intrs,
 
 	for_each_cpu(cpu, mask) {
 		bd = per_cpu_ptr(&balance_data, cpu);
+		/* Skip CPUs offlined after the snapshot (core_ctl/hotplug). */
+		if (unlikely(!cpu_online(cpu) || !cpu_active(cpu)))
+			continue;
 		intrs = scale_intrs(bd->intrs, bd->cpu);
 
 		/* Terminate when the formerly-max CPU isn't the max anymore */
@@ -212,6 +221,8 @@ static void balance_irqs(void)
 
 	/* Find the available CPUs for balancing, if there are any */
 	cpumask_copy(&cpus, cpu_active_mask);
+	/* core_ctl can offline CPUs right after this snapshot; mask them out. */
+	cpumask_and(&cpus, &cpus, cpu_online_mask);
 	if (unlikely(cpumask_weight(&cpus) <= 1))
 		goto unlock;
 
@@ -255,6 +266,8 @@ static void balance_irqs(void)
 		max_intrs = 0;
 		for_each_cpu(cpu, &cpus) {
 			bd = per_cpu_ptr(&balance_data, cpu);
+			if (unlikely(!cpu_online(cpu) || !cpu_active(cpu)))
+				continue;
 			intrs = scale_intrs(bd->intrs, bd->cpu);
 			if (intrs > max_intrs) {
 				max_intrs = intrs;
@@ -388,7 +401,12 @@ static int __noreturn sbalance_thread(void *data)
 
 static int __init sbalance_init(void)
 {
-	BUG_ON(IS_ERR(kthread_run(sbalance_thread, NULL, "sbalanced")));
+	struct task_struct *tsk;
+	tsk = kthread_run(sbalance_thread, NULL, "sbalanced");
+	if (IS_ERR(tsk)) {
+		pr_err("failed to start balancer thread: %ld\n", PTR_ERR(tsk));
+		return PTR_ERR(tsk);
+	}
 	return 0;
 }
 late_initcall(sbalance_init);
