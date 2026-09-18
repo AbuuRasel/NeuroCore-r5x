@@ -49,7 +49,7 @@ ui_print "BY     : AbuuRaseL";
 ui_print "Tele.  : t.me/@AbuuRaseL";
 ui_print "KSU-N  : v3.3.0";
 ui_print "SUSFS  : v2.2.0";
-ui_print "Linux  : v4.14.357";
+ui_print "Linux  : v4.14.357-openela";
 ui_print "================================================";
 ui_print " ";
 
