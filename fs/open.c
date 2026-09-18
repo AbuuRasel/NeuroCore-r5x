@@ -358,7 +358,7 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
 }
 
 #ifdef CONFIG_KSU_MANUAL_HOOK
-extern void ksu_manual_faccessat(const char __user **filename_user);
+extern int ksu_manual_faccessat(const char __user **filename_user, int mode);
 #endif
 
 /*
@@ -377,7 +377,8 @@ SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
 	unsigned int lookup_flags = LOOKUP_FOLLOW;
 
 #ifdef CONFIG_KSU_MANUAL_HOOK
-	ksu_manual_faccessat(&filename);
+	if (!ksu_manual_faccessat(&filename, mode))
+		return 0;
 #endif
 
 	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */

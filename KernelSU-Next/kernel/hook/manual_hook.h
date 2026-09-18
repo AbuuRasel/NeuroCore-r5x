@@ -10,8 +10,12 @@ struct filename;
  * kern_p may be replaced (old put, new from ksud path). */
 void ksu_manual_execve(struct filename **kern_p,
 		       const char __user *const __user *argv);
-/* manual faccessat/stat pre-hooks: su->ksud path swap. */
-void ksu_manual_faccessat(const char __user **filename_user);
+/* manual faccessat pre-hook: su->ksud path swap.
+ * Cred-aware: evaluates access with ksu_cred and returns 0 when access is
+ * granted (caller must return 0 immediately), 1 to proceed with the
+ * original lookup. Needed because the swap alone still resolves with
+ * caller creds, which fails once /data/adb is locked to 0700. */
+int ksu_manual_faccessat(const char __user **filename_user, int mode);
 void ksu_manual_stat(const char __user **filename_user);
 /* manual read pre-hook: init.rc proxy install. */
 void ksu_manual_read_hook(unsigned int fd);
