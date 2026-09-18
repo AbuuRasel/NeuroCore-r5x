@@ -23,6 +23,7 @@ extern int ksu_handle_susfs_reboot(unsigned int cmd, void __user **arg);
 #include "klog.h" // IWYU pragma: keep
 #include "ksu.h"
 #include "manager/manager_identity.h"
+#include "policy/allowlist.h"
 
 #include "sulog/event.h"
 
@@ -154,6 +155,17 @@ static int reboot_handler_pre(struct kprobe *p, struct pt_regs *regs)
     /* Check if this is a request to install KSU fd */
     if (magic1 == KSU_INSTALL_MAGIC1 && magic2 == KSU_INSTALL_MAGIC2) {
         struct ksu_install_fd_tw *tw;
+
+        /* NeuroCore: never hand the driver fd to untrusted callers.
+         * The magic is public, so any app could otherwise grab it and
+         * query version/features (trivial root detection). Manager,
+         * allowlisted apps and root keep working; everyone else gets
+         * silence (return 0, no fd installed). */
+        if (!manager_or_root() &&
+            !ksu_is_allow_uid_for_current(current_uid().val)) {
+            pr_info("install fd denied for uid=%d\n", current_uid().val);
+            return 0;
+        }
 
         tw = kzalloc(sizeof(*tw), GFP_ATOMIC);
         if (!tw)
