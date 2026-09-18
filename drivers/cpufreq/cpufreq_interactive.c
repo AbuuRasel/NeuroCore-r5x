@@ -37,11 +37,6 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/cpufreq_interactive.h>
 
-/* NeuroCore: CAF cpufreq.h dropped the mainline macro used below. */
-#ifndef TRANSITION_LATENCY_LIMIT
-#define TRANSITION_LATENCY_LIMIT (10 * 1000 * 1000)
-#endif
-
 #define gov_attr_ro(_name)						\
 static struct governor_attr _name =					\
 __ATTR(_name, 0444, show_##_name, NULL)
@@ -1339,7 +1334,6 @@ void cpufreq_interactive_limits(struct cpufreq_policy *policy)
 static struct interactive_governor interactive_gov = {
 	.gov = {
 		.name			= "interactive",
-		.max_transition_latency	= TRANSITION_LATENCY_LIMIT,
 		.owner			= THIS_MODULE,
 		.init			= cpufreq_interactive_init,
 		.exit			= cpufreq_interactive_exit,
