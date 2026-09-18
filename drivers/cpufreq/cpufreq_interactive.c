@@ -37,6 +37,11 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/cpufreq_interactive.h>
 
+/* NeuroCore: CAF cpufreq.h dropped the mainline macro used below. */
+#ifndef TRANSITION_LATENCY_LIMIT
+#define TRANSITION_LATENCY_LIMIT (10 * 1000 * 1000)
+#endif
+
 #define gov_attr_ro(_name)						\
 static struct governor_attr _name =					\
 __ATTR(_name, 0444, show_##_name, NULL)
