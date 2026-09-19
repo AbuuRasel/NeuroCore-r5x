@@ -829,10 +829,12 @@ CONFIG_ADRENO_IDLER=y
 CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
 CONFIG_MEDIA_USB_SUPPORT=y
 CONFIG_USB_VIDEO_CLASS=y
-CONFIG_IRQ_SBALANCE=y
-CONFIG_IRQ_SBALANCE_POLL_MSEC=5000
-CONFIG_IRQ_SBALANCE_THRESH=1024
-CONFIG_SBALANCE_EXCLUDE_CPUS=""
+# NeuroCore stability: SBalance runtime IRQ migration disabled by
+# default (hide414-stable parity). It moved modem/IPA/GPU IRQs every
+# 5s across core_ctl-offlined CPUs -> silent SSR/watchdog reboots.
+# Code stays in tree (guarded); re-enable with CONFIG_IRQ_SBALANCE=y
+# plus an exclude mask, only for testing.
+# CONFIG_IRQ_SBALANCE is not set
 CONFIG_BATTERY_SAVER=y
 CONFIG_SCHED_WALT=y
 CONFIG_SCHED_CORE_CTL=y
