@@ -994,7 +994,9 @@ static int sugov_init(struct cpufreq_policy *policy)
 	tunables->hispeed_load = DEFAULT_HISPEED_LOAD;
 	tunables->hispeed_freq = 0;
 
-	tunables->iowait_boost_enable = false;
+	/* NeuroCore: boost on storage wakeups by default for app-launch
+	 * responsiveness (still tunable via iowait_boost_enable). */
+	tunables->iowait_boost_enable = true;
 
 	policy->governor_data = sg_policy;
 	sg_policy->tunables = tunables;
