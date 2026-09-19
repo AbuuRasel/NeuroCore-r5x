@@ -9,13 +9,13 @@
  *
  * mic_gain:     TX_DEC0 + TX_DEC1 Volume (in-call mics)
  * speaker_gain: RX_RX0 + RX_RX1 Digital Volume (speaker path)
- * Boot default: mic = stock + 6dB (fixes low in-call mic), speaker = stock.
+ * Boot default: mic = stock + 8dB (fixes low in-call mic), speaker = stock + 4dB.
  * Stock mic values readable via mic_gain_stock (always reversible).
  * v1.3: mic and speaker pairs resolve independently so a missing/renamed
  * speaker control can no longer make mic_gain_stock return ENODEV, and a
  * cached stock value stays readable even if the codec is momentarily busy.
  * Use the read-only "controls" node to verify actual card/control names.
- * v1.4: stock snapshot (read) and +6dB boost (write) are split. A failed
+ * v1.4: stock snapshot (read) and +8dB boost (write) are split. A failed
  * boost write (e.g. TX macro down while idle) is logged, retried later,
  * and never blocks mic reads/writes. New "status" node exposes
  * mic_ok/spk_ok/stock_done/boost_done/boost_err for diagnosis.
@@ -42,7 +42,8 @@
 
 #define SC_DB_MIN	-84
 #define SC_DB_MAX	40
-#define SC_MIC_BOOST	6
+#define SC_MIC_BOOST	8
+#define SC_SPK_BOOST	4
 
 static inline int sc_db_to_raw(int db)
 {
@@ -60,11 +61,15 @@ static DEFINE_MUTEX(sc_lock);
 static struct snd_kcontrol *sc_mic[2];
 static struct snd_kcontrol *sc_spk[2];
 static int sc_mic_stock_db[2];
+static int sc_spk_stock_db[2];
 static bool sc_mic_ok;
 static bool sc_spk_ok;
 static bool sc_default_done;
 static bool sc_boost_done;
 static int sc_boost_err;
+static bool sc_spk_default_done;
+static bool sc_spk_boost_done;
+static int sc_spk_boost_err;
 
 static const char *sc_mic_names[2] = { "TX_DEC0 Volume", "TX_DEC1 Volume" };
 static const char *sc_spk_names[2] = { "RX_RX0 Digital Volume",
@@ -236,7 +241,7 @@ static void sc_maybe_snapshot_mic(void)
 }
 
 /*
- * Best-effort +6dB boost. A failed write (e.g. TX macro clocked down
+ * Best-effort +8dB mic boost. A failed write (e.g. TX macro clocked down
  * while idle) is logged and retried on the next access but NEVER
  * invalidates the mic pair or blocks reads/writes. Caller holds sc_lock.
  */
@@ -270,6 +275,71 @@ static void sc_maybe_boost_mic(void)
 	sc_boost_err = 0;
 	sc_boost_done = true;
 	pr_info("sound_control: mic boosted to %d/%d dB\n", v0, v1);
+}
+
+/*
+ * Speaker auto boost (+4dB over stock). Same best-effort pattern as the
+ * mic path: snapshot stock once, apply once, manual sysfs writes override.
+ * Caller holds sc_lock.
+ */
+static void sc_maybe_snapshot_spk(void)
+{
+	int v0, v1, r0, r1;
+
+	if (sc_spk_default_done)
+		return;
+	if (!sc_spk_ok)
+		return;
+	r0 = sc_kctl_get_db(sc_spk[0], &v0);
+	r1 = sc_kctl_get_db(sc_spk[1], &v1);
+	if (r0 || r1) {
+		pr_err_ratelimited("sound_control: spk snapshot read failed (%d/%d)\n",
+				   r0, r1);
+		sc_invalidate_spk();
+		return;
+	}
+	if (v0 < SC_DB_MIN || v0 > SC_DB_MAX ||
+	    v1 < SC_DB_MIN || v1 > SC_DB_MAX) {
+		pr_err("sound_control: spk snapshot out of range %d/%d dB\n",
+		       v0, v1);
+		return;
+	}
+	sc_spk_stock_db[0] = v0;
+	sc_spk_stock_db[1] = v1;
+	sc_spk_default_done = true;
+	pr_info("sound_control: spk stock %d/%d dB\n", v0, v1);
+}
+
+static void sc_maybe_boost_spk(void)
+{
+	int v0, v1, r0, r1;
+
+	if (sc_spk_boost_done || !sc_spk_default_done || !sc_spk_ok)
+		return;
+	v0 = sc_spk_stock_db[0];
+	v1 = sc_spk_stock_db[1];
+	if (v0 > SC_DB_MAX - SC_SPK_BOOST)
+		v0 = SC_DB_MAX;
+	else
+		v0 += SC_SPK_BOOST;
+	if (v1 > SC_DB_MAX - SC_SPK_BOOST)
+		v1 = SC_DB_MAX;
+	else
+		v1 += SC_SPK_BOOST;
+	r0 = sc_kctl_set_db(sc_spk[0], v0);
+	r1 = sc_kctl_set_db(sc_spk[1], v1);
+	if (r0 || r1) {
+		if (!sc_spk_boost_err)
+			pr_err("sound_control: spk boost write failed (%d/%d), will retry\n",
+			       r0, r1);
+		sc_spk_boost_err = r0 ? r0 : r1;
+		return;
+	}
+	if (sc_spk_boost_err)
+		pr_info("sound_control: spk boost write recovered\n");
+	sc_spk_boost_err = 0;
+	sc_spk_boost_done = true;
+	pr_info("sound_control: spk boosted to %d/%d dB\n", v0, v1);
 }
 
 /* Set both channels; error if EITHER fails (no silent split-brain). */
@@ -348,6 +418,8 @@ static ssize_t speaker_gain_show(struct kobject *kobj,
 		mutex_unlock(&sc_lock);
 		return -ENODEV;
 	}
+	sc_maybe_snapshot_spk();
+	sc_maybe_boost_spk();
 	if (sc_kctl_get_db(sc_spk[0], &v0) ||
 	    sc_kctl_get_db(sc_spk[1], &v1)) {
 		sc_invalidate_spk();
@@ -375,9 +447,15 @@ static ssize_t speaker_gain_store(struct kobject *kobj,
 		mutex_unlock(&sc_lock);
 		return -ENODEV;
 	}
+	sc_maybe_snapshot_spk();
 	ret = sc_set_pair(sc_spk, (int)val);
-	if (ret)
+	if (ret) {
 		sc_invalidate_spk();
+	} else {
+		/* Manual set overrides the auto boost. */
+		sc_spk_boost_done = true;
+		sc_spk_boost_err = 0;
+	}
 	mutex_unlock(&sc_lock);
 	return ret ? ret : (ssize_t)count;
 }
@@ -464,9 +542,11 @@ static ssize_t status_show(struct kobject *kobj, struct kobj_attribute *attr,
 
 	mutex_lock(&sc_lock);
 	ret = scnprintf(buf, PAGE_SIZE,
-			"mic_ok=%d spk_ok=%d stock_done=%d boost_done=%d boost_err=%d stock=%d/%d\n",
+			"mic_ok=%d spk_ok=%d stock_done=%d boost_done=%d boost_err=%d stock=%d/%d spk_boost_done=%d spk_boost_err=%d spk_stock=%d/%d\n",
 			sc_mic_ok, sc_spk_ok, sc_default_done, sc_boost_done,
-			sc_boost_err, sc_mic_stock_db[0], sc_mic_stock_db[1]);
+			sc_boost_err, sc_mic_stock_db[0], sc_mic_stock_db[1],
+			sc_spk_boost_done, sc_spk_boost_err,
+			sc_spk_stock_db[0], sc_spk_stock_db[1]);
 	mutex_unlock(&sc_lock);
 	return ret;
 }
@@ -513,6 +593,10 @@ static int __init sound_control_init(void)
 		sc_maybe_boost_mic();
 	}
 	sc_resolve_spk();
+	if (sc_spk_ok) {
+		sc_maybe_snapshot_spk();
+		sc_maybe_boost_spk();
+	}
 	mutex_unlock(&sc_lock);
 	return 0;
 }
