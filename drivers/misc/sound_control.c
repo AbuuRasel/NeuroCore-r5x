@@ -9,13 +9,13 @@
  *
  * mic_gain:     TX_DEC0 + TX_DEC1 Volume (in-call mics)
  * speaker_gain: RX_RX0 + RX_RX1 Digital Volume (speaker path)
- * Boot default: mic = stock + 8dB (fixes low in-call mic), speaker = stock + 4dB.
+ * Boot default: mic = stock + 6dB (fixes low in-call mic), speaker = stock + 4dB.
  * Stock mic values readable via mic_gain_stock (always reversible).
  * v1.3: mic and speaker pairs resolve independently so a missing/renamed
  * speaker control can no longer make mic_gain_stock return ENODEV, and a
  * cached stock value stays readable even if the codec is momentarily busy.
  * Use the read-only "controls" node to verify actual card/control names.
- * v1.4: stock snapshot (read) and +8dB boost (write) are split. A failed
+ * v1.4: stock snapshot (read) and +6dB boost (write) are split. A failed
  * boost write (e.g. TX macro down while idle) is logged, retried later,
  * and never blocks mic reads/writes. New "status" node exposes
  * mic_ok/spk_ok/stock_done/boost_done/boost_err for diagnosis.
@@ -42,7 +42,7 @@
 
 #define SC_DB_MIN	-84
 #define SC_DB_MAX	40
-#define SC_MIC_BOOST	8
+#define SC_MIC_BOOST	6
 #define SC_SPK_BOOST	4
 
 static inline int sc_db_to_raw(int db)
@@ -241,7 +241,7 @@ static void sc_maybe_snapshot_mic(void)
 }
 
 /*
- * Best-effort +8dB mic boost. A failed write (e.g. TX macro clocked down
+ * Best-effort +6dB mic boost. A failed write (e.g. TX macro clocked down
  * while idle) is logged and retried on the next access but NEVER
  * invalidates the mic pair or blocks reads/writes. Caller holds sc_lock.
  */
