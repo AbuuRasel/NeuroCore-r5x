@@ -43,6 +43,8 @@ struct bal_irq {
 	unsigned int delta_nr;
 	unsigned int old_nr;
 	int prev_cpu;
+	/* Set once we move this IRQ ourselves (see balance_irqs) */
+	bool sbal_managed;
 };
 
 struct bal_domain {
@@ -155,6 +157,8 @@ static int move_irq_to_cpu(struct bal_irq *bi, int cpu)
 	raw_spin_unlock_irq(&desc->lock);
 
 	if (!ret) {
+		/* This IRQ is now ours to manage (see balance_irqs) */
+		bi->sbal_managed = true;
 		/* Update the old interrupt count using the new CPU */
 		bi->old_nr = *per_cpu_ptr(desc->kstat_irqs, cpu);
 		pr_debug("Moved IRQ%d (CPU%d -> CPU%d)\n",
@@ -255,6 +259,20 @@ static void balance_irqs(void)
 			bi->prev_cpu = cpu;
 			continue;
 		}
+
+		/*
+		 * Never touch IRQs that firmware/drivers pinned to a custom
+		 * affinity (modem, IPA, RPMH, PDC...). Only balance IRQs
+		 * whose affinity still covers every online CPU, plus IRQs
+		 * we moved ourselves. Migrating a pinned IRQ can wedge its
+		 * owner -> silent SSR/watchdog reset with no panic log.
+		 * (balance_irqs runs under cpus_read_lock, so the online
+		 * mask is stable for this check.)
+		 */
+		if (!bi->sbal_managed &&
+		    !cpumask_subset(cpu_online_mask,
+				    bi->desc->irq_common_data.affinity))
+			continue;
 
 		/* Add this IRQ to its CPU's list of movable IRQs */
 		bd = per_cpu_ptr(&balance_data, cpu);
