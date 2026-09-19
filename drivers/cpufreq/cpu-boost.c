@@ -339,3 +339,32 @@ static int cpu_boost_init(void)
 	return 0;
 }
 late_initcall(cpu_boost_init);
+
+/* NeuroCore profiles entry points (see drivers/misc/neurocore_profile.c).
+ * Trinket cluster split matches defconfig masks: cpu0-3 Silver. */
+void cpuboost_set_input_boost_ms(unsigned int ms)
+{
+	input_boost_ms = ms;
+}
+
+void cpuboost_set_sched_boost_on_input(unsigned int v)
+{
+	sched_boost_on_input = v;
+}
+
+void cpuboost_set_boost_freq(unsigned int little_khz, unsigned int big_khz)
+{
+	int i;
+
+	for_each_possible_cpu(i)
+		per_cpu(sync_info, i).input_boost_freq =
+			i < 4 ? little_khz : big_khz;
+
+	input_boost_enabled = false;
+	for_each_possible_cpu(i) {
+		if (per_cpu(sync_info, i).input_boost_freq) {
+			input_boost_enabled = true;
+			break;
+		}
+	}
+}

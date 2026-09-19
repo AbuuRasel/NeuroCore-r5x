@@ -35,6 +35,12 @@ module_param_named(adreno_idler_idlewait, adreno_idler_idlewait, int, 0664);
 module_param_named(adreno_idler_idleworkload, adreno_idler_idleworkload,
 		   int, 0664);
 
+/* NeuroCore profiles entry point (see drivers/misc/neurocore_profile.c). */
+void adreno_idler_set_active(int active)
+{
+	adreno_idler_active = !!active;
+}
+
 int adreno_idler_check(struct devfreq *devfreq, int level,
 		       struct devfreq_dev_status *stats)
 {

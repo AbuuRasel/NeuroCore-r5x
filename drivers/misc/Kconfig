@@ -609,6 +609,15 @@ config BATTERY_SAVER
 
 	  If in doubt, say N.
 
+config NEUROCORE_PROFILE
+	bool "NeuroCore kernel profiles (balanced/performance/powersave)"
+	default y
+	help
+	  Single-knob profiles at /sys/kernel/neurocore/profile:
+	  balanced (default), performance, powersave. Applies one
+	  consistent tune across cpu-boost, Adreno idler and the
+	  kernelspace battery saver.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
