@@ -1775,7 +1775,7 @@ enum hdd_dot11_mode {
 #define CFG_ROAM_RSSI_DIFF_NAME                             "RoamRssiDiff"
 #define CFG_ROAM_RSSI_DIFF_MIN                              (0)
 #define CFG_ROAM_RSSI_DIFF_MAX                              (100)
-#define CFG_ROAM_RSSI_DIFF_DEFAULT                          (5)
+#define CFG_ROAM_RSSI_DIFF_DEFAULT                          (4)
 
 /*
  * <ini>
@@ -4803,7 +4803,7 @@ enum station_keepalive_method {
 #define CFG_NEIGHBOR_LOOKUP_RSSI_THRESHOLD_NAME      "gNeighborLookupThreshold"
 #define CFG_NEIGHBOR_LOOKUP_RSSI_THRESHOLD_MIN       (10)
 #define CFG_NEIGHBOR_LOOKUP_RSSI_THRESHOLD_MAX       (120)
-#define CFG_NEIGHBOR_LOOKUP_RSSI_THRESHOLD_DEFAULT   (78)
+#define CFG_NEIGHBOR_LOOKUP_RSSI_THRESHOLD_DEFAULT   (80)
 
 /*
  * <ini>

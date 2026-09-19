@@ -132,6 +132,35 @@ static struct kobj_attribute profile_attr =
 static struct kobj_attribute available_profiles_attr =
 	__ATTR(available_profiles, 0444, available_profiles_show, NULL);
 
+/*
+ * Biofrost/FKM-compatible alias: /sys/kernel/kprofiles/kp_mode
+ * Accepts the same names plus 0/1/2 (0=balanced, 1=performance,
+ * 2=powersave) so FKM Custom Tunables and Biofrost-style scripts
+ * work unchanged. Shows the current profile name.
+ */
+static ssize_t kp_mode_show(struct kobject *kobj,
+			    struct kobj_attribute *attr, char *buf)
+{
+	return profile_show(kobj, attr, buf);
+}
+
+static ssize_t kp_mode_store(struct kobject *kobj,
+			     struct kobj_attribute *attr,
+			     const char *buf, size_t count)
+{
+	if (!strcmp(buf, "0\n"))
+		return profile_store(kobj, attr, "balanced", 9);
+	if (!strcmp(buf, "1\n"))
+		return profile_store(kobj, attr, "performance", 12);
+	if (!strcmp(buf, "2\n"))
+		return profile_store(kobj, attr, "powersave", 10);
+	return profile_store(kobj, attr, buf, count);
+}
+
+static struct kobj_attribute kp_mode_attr =
+	__ATTR(kp_mode, 0664, kp_mode_show, kp_mode_store);
+static struct kobject *kprofiles_kobj;
+
 static int __init neurocore_profile_init(void)
 {
 	int ret;
@@ -145,10 +174,22 @@ static int __init neurocore_profile_init(void)
 	ret = sysfs_create_file(neuro_kobj, &available_profiles_attr.attr);
 	if (ret)
 		goto err_profile;
+	kprofiles_kobj = kobject_create_and_add("kprofiles", kernel_kobj);
+	if (!kprofiles_kobj) {
+		ret = -ENOMEM;
+		goto err_available;
+	}
+	ret = sysfs_create_file(kprofiles_kobj, &kp_mode_attr.attr);
+	if (ret)
+		goto err_kprofiles;
 	/* Defaults everywhere already equal balanced; normalize anyway. */
 	neuro_apply_profile(NEURO_BALANCED);
 	return 0;
 
+err_kprofiles:
+	kobject_put(kprofiles_kobj);
+err_available:
+	sysfs_remove_file(neuro_kobj, &available_profiles_attr.attr);
 err_profile:
 	sysfs_remove_file(neuro_kobj, &profile_attr.attr);
 err:
