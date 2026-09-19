@@ -256,14 +256,24 @@ u32 susfs_zygote_sid __read_mostly = 0;
 u32 susfs_zygote_next_sid __read_mostly = 0;
 u32 susfs_priv_app_sid __read_mostly = 0;
 
-static void susfs_set_sid(const char *secctx_name, u32 *out_sid)
+static void susfs_set_sid(const char *secctx_name, u32 *out_sid,
+			  bool optional)
 {
 	int err;
 	if (!secctx_name || !out_sid)
 		return;
 	err = security_secctx_to_secid(secctx_name, strlen(secctx_name), out_sid);
 	if (err) {
-		pr_err("susfs: failed setting sid for '%s', err: %d\n", secctx_name, err);
+		/* NeuroCore: zygote_next exists only on newer Android
+		 * policies (absent on this Android 10 vendor policy) and
+		 * susfs_zygote_next_sid has no readers when unset, so a
+		 * missing optional context is informational, not a failure. */
+		if (optional)
+			pr_info("susfs: sid for '%s' not present (err=%d), skipping\n",
+				secctx_name, err);
+		else
+			pr_err("susfs: failed setting sid for '%s', err: %d\n",
+			       secctx_name, err);
 		return;
 	}
 	pr_info("susfs: sid '%u' set for '%s'\n", *out_sid, secctx_name);
@@ -271,11 +281,11 @@ static void susfs_set_sid(const char *secctx_name, u32 *out_sid)
 
 void susfs_set_batch_sid(void)
 {
-	susfs_set_sid("u:r:zygote:s0", &susfs_zygote_sid);
-	susfs_set_sid("u:r:zygote_next:s0", &susfs_zygote_next_sid);
-	susfs_set_sid(KERNEL_SU_CONTEXT, &susfs_ksu_sid);
-	susfs_set_sid(INIT_CONTEXT, &susfs_init_sid);
-	susfs_set_sid("u:r:priv_app:s0:c512,c768", &susfs_priv_app_sid);
+	susfs_set_sid("u:r:zygote:s0", &susfs_zygote_sid, false);
+	susfs_set_sid("u:r:zygote_next:s0", &susfs_zygote_next_sid, true);
+	susfs_set_sid(KERNEL_SU_CONTEXT, &susfs_ksu_sid, false);
+	susfs_set_sid(INIT_CONTEXT, &susfs_init_sid, false);
+	susfs_set_sid("u:r:priv_app:s0:c512,c768", &susfs_priv_app_sid, false);
 }
 
 bool susfs_is_current_zygote_domain(void)
