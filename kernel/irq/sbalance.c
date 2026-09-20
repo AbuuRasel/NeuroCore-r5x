@@ -18,6 +18,7 @@
 #include <linux/irq.h>
 #include <linux/kernel_stat.h>
 #include <linux/list_sort.h>
+#include <linux/string.h>
 #include "../sched/sched.h"
 #include "internals.h"
 
@@ -97,6 +98,36 @@ static bool sbalance_irq_movable(struct irq_desc *desc)
 	    !desc->irq_data.chip || !desc->irq_data.chip->irq_set_affinity)
 		return false;
 	return true;
+}
+
+/*
+ * Display/GPU IRQ action-name fragments that must never migrate.
+ * Moving them mid-composition drops vsyncs and flickers the panel,
+ * most visibly during the first balancing storm after boot (which is
+ * why a fresh boot + first touch flickers, then settles on its own).
+ */
+static bool sbalance_irq_display(struct irq_desc *desc)
+{
+	struct irqaction *action;
+	bool denied = false;
+
+	raw_spin_lock_irq(&desc->lock);
+	for (action = desc->action; action; action = action->next) {
+		if (!action->name)
+			continue;
+		if (strstr(action->name, "dsi") ||
+		    strstr(action->name, "mdss") ||
+		    strstr(action->name, "mdp") ||
+		    strstr(action->name, "sde") ||
+		    strstr(action->name, "crtc") ||
+		    strstr(action->name, "kgsl") ||
+		    strstr(action->name, "gpu")) {
+			denied = true;
+			break;
+		}
+	}
+	raw_spin_unlock_irq(&desc->lock);
+	return denied;
 }
 
 static int bal_irq_move_node_cmp(void *priv, struct list_head *lhs_p,
@@ -272,6 +303,10 @@ static void balance_irqs(void)
 		if (!bi->sbal_managed &&
 		    !cpumask_subset(cpu_online_mask,
 				    bi->desc->irq_common_data.affinity))
+			continue;
+
+		/* Never migrate display/GPU IRQs (see above) */
+		if (sbalance_irq_display(bi->desc))
 			continue;
 
 		/* Add this IRQ to its CPU's list of movable IRQs */
