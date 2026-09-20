@@ -17,9 +17,9 @@
 /*
  * Possible values for "force_fast_charge" are :
  *
- *   0 - Disabled (default)
- *   1 - Force faster charge
-*/
+ *   0 - Disabled
+ *   1 - Force faster charge (default, NeuroCore: ON out of the box)
+ */
 
 #include <linux/kobject.h>
 #include <linux/sysfs.h>
@@ -27,7 +27,9 @@
 #include <linux/string.h>
 #include <linux/module.h>
 
-int force_fast_charge = 0;
+/* NeuroCore: default ON (raises SDP 500mA -> 900mA). Still tunable
+ * via ffc= cmdline and /sys/kernel/fast_charge/force_fast_charge. */
+int force_fast_charge = 1;
 
 static int __init get_fastcharge_opt(char *ffc)
 {
