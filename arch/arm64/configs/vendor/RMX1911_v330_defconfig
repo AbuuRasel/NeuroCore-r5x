@@ -831,12 +831,10 @@ CONFIG_ADRENO_IDLER=y
 CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
 CONFIG_MEDIA_USB_SUPPORT=y
 CONFIG_USB_VIDEO_CLASS=y
-# NeuroCore: SBalance ON with root-cause fix. Guards: never park IRQs
-# on offline/inactive CPUs (online checks + cpus_read_lock snapshot),
-# never touch driver-pinned IRQs (modem/IPA/RPMH custom affinity),
-# exclude mask 3,7 (trinket parity). Earlier silent SSR/watchdog
-# reboots came from migrating pinned/offlined-CPU IRQs.
-CONFIG_IRQ_SBALANCE=y
+# NeuroCore: SBalance OFF for flicker bisect (MGLRU exonerated via
+# runtime kill-switch test). Display/GPU denylist + guards stay in
+# tree; re-enable with CONFIG_IRQ_SBALANCE=y to retest.
+# CONFIG_IRQ_SBALANCE is not set
 CONFIG_SBALANCE_EXCLUDE_CPUS="3,7"
 CONFIG_BATTERY_SAVER=y
 CONFIG_SCHED_WALT=y
