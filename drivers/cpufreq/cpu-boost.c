@@ -326,13 +326,7 @@ static int cpu_boost_init(void)
 	for_each_possible_cpu(cpu) {
 		s = &per_cpu(sync_info, cpu);
 		s->cpu = cpu;
-		/* NeuroCore/trinket out-of-box touch floor for smooth
-		 * scrolling (runtime-tunable via
-		 * /sys/module/cpu_boost/parameters/input_boost_freq).
-		 * Matches defconfig masks: cpu0-3 Silver, cpu4-7 Gold. */
-		s->input_boost_freq = cpu < 4 ? 1363200 : 1401600;
 	}
-	input_boost_enabled = true;
 	cpufreq_register_notifier(&boost_adjust_nb, CPUFREQ_POLICY_NOTIFIER);
 
 	ret = input_register_handler(&cpuboost_input_handler);
