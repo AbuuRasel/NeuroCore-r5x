@@ -146,6 +146,8 @@ enum {
 	WEAK_ADAPTER_WA			= BIT(2),
 	USBIN_OV_WA			= BIT(3),
 	CHG_TERMINATION_WA		= BIT(4),
+	/* BIT(5) reserved for USBIN_ADC_WA (Nullifier parity) */
+	SKIP_MISC_PBS_IRQ_WA		= BIT(6),
 };
 
 enum jeita_cfg_stat {

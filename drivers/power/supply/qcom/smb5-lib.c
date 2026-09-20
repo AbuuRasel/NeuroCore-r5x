@@ -1672,6 +1672,17 @@ int smblib_get_irq_status(struct smb_charger *chg,
 	int rc;
 	u8 reg;
 
+	/*
+	 * PMI632 has no readable MISC_PBS_RT_STS (Nullifier parity:
+	 * SKIP_MISC_PBS_IRQ_WA). Reading it always fails with -ENODEV,
+	 * spamming the log and returning an error to the power-supply
+	 * core on every irq-status query. Skip the doomed read.
+	 */
+	if (chg->wa_flags & SKIP_MISC_PBS_IRQ_WA) {
+		val->intval = 0;
+		return 0;
+	}
+
 	mutex_lock(&chg->irq_status_lock);
 	/* Report and clear cached status */
 	val->intval = chg->irq_status;
