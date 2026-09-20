@@ -43,8 +43,6 @@ const char *migrate_type_names[] = {"GROUP_TO_RQ", "RQ_TO_GROUP",
 
 #define EARLY_DETECTION_DURATION 9500000
 
-static ktime_t ktime_last;
-static bool sched_ktime_suspended;
 static struct cpu_cycle_counter_cb cpu_cycle_counter_cb;
 static bool use_cycle_counter;
 DEFINE_MUTEX(cluster_lock);
@@ -56,34 +54,18 @@ static struct irq_work walt_migration_irq_work;
 
 u64 sched_ktime_clock(void)
 {
-	if (unlikely(sched_ktime_suspended))
-		return ktime_to_ns(ktime_last);
-	return ktime_get_ns();
+	/*
+	 * NeuroCore: use the NMI-safe fast monotonic clock. ktime_get_ns()
+	 * WARNs and can hand back a stale timestamp when called with
+	 * timekeeping suspended, and the s2idle path (suspend_enter ->
+	 * s2idle_loop) never runs syscore_suspend(), so the old
+	 * sched_ktime_suspended guard did not cover s2idle.
+	 * A backwards timestamp used to BUG_ON() in update_window_start()
+	 * (random reboots with screen off). mono_fast_ns shares the same
+	 * CLOCK_MONOTONIC base, so WALT window arithmetic is unaffected.
+	 */
+	return ktime_get_mono_fast_ns();
 }
-
-static void sched_resume(void)
-{
-	sched_ktime_suspended = false;
-}
-
-static int sched_suspend(void)
-{
-	ktime_last = ktime_get();
-	sched_ktime_suspended = true;
-	return 0;
-}
-
-static struct syscore_ops sched_syscore_ops = {
-	.resume = sched_resume,
-	.suspend = sched_suspend
-};
-
-static int __init sched_init_ops(void)
-{
-	register_syscore_ops(&sched_syscore_ops);
-	return 0;
-}
-late_initcall(sched_init_ops);
 
 static void acquire_rq_locks_irqsave(const cpumask_t *cpus,
 				     unsigned long *flags)
@@ -313,7 +295,16 @@ update_window_start(struct rq *rq, u64 wallclock, int event)
 	u64 old_window_start = rq->window_start;
 
 	delta = wallclock - rq->window_start;
-	BUG_ON(delta < 0);
+	/*
+	 * NeuroCore: never BUG on a backwards clock (s2idle suspend can
+	 * hand update_task_ravg() a stale wallclock). Clamp and log once;
+	 * a missed window is harmless, a panic is not.
+	 */
+	if (unlikely(delta < 0)) {
+		WARN_ONCE(1, "WALT: wallclock went backwards by %lld ns\n",
+			   -delta);
+		return old_window_start;
+	}
 	if (delta < sched_ravg_window)
 		return old_window_start;
 
