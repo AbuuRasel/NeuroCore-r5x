@@ -1836,7 +1836,7 @@ static int spi_geni_suspend(struct device *dev)
 		}
 	}
 	#endif
-	printk("come in spi_geni_suspend %d\n",ret);
+	pr_debug("come in spi_geni_suspend %d\n", ret);
 	return ret;
 }
 #else

@@ -1794,6 +1794,19 @@ static int __init lpm_levels_module_init(void)
 {
 	int rc;
 
+	/*
+	 * NeuroCore: this ROM's bootloader cmdline carries
+	 * lpm_levels.sleep_disabled=1, which pins the SoC out of its
+	 * deepest cluster states (s2idle abort loop + battery drain).
+	 * AnyKernel flashes cannot change the bootloader cmdline, so
+	 * clear the flag here. Still tunable at runtime via
+	 * /sys/module/lpm_levels/parameters/sleep_disabled.
+	 */
+	if (sleep_disabled) {
+		pr_info("lpm_levels: overriding bootloader sleep_disabled=1 -> 0\n");
+		sleep_disabled = false;
+	}
+
 #ifdef CONFIG_ARM
 	int cpu;
 

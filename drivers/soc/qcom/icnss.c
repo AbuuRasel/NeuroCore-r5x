@@ -4018,7 +4018,7 @@ out:
 static int icnss_pm_suspend_noirq(struct device *dev)
 {
 	struct icnss_priv *priv = dev_get_drvdata(dev);
-	int ret = 0;
+	int ret = 0, i;
 
 	if (priv->magic != ICNSS_MAGIC) {
 		icnss_pr_err("Invalid drvdata for pm suspend_noirq: dev %pK, data %pK, magic 0x%x\n",
@@ -4032,7 +4032,18 @@ static int icnss_pm_suspend_noirq(struct device *dev)
 	    !test_bit(ICNSS_DRIVER_PROBED, &priv->state))
 		goto out;
 
-	ret = priv->ops->suspend_noirq(dev);
+	/*
+	 * NeuroCore: FW is occasionally still busy when noirq runs and
+	 * refuses with -EAGAIN. Retry briefly before giving up; an
+	 * immediate abort here is what drove the suspend/resume thrash.
+	 * msleep is safe: noirq runs in process context with IRQs on.
+	 */
+	for (i = 0; i < 3; i++) {
+		ret = priv->ops->suspend_noirq(dev);
+		if (ret != -EAGAIN)
+			break;
+		msleep(20);
+	}
 
 out:
 	if (ret == 0) {

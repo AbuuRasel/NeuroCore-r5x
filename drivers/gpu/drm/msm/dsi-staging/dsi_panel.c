@@ -913,7 +913,7 @@ static int dsi_panel_update_backlight(struct dsi_panel *panel,
 		return -EINVAL;
 	}
 
-	pr_err("dsi_panel_update_backlight---lvl:%d\n", bl_lvl);
+	pr_debug("dsi_panel_update_backlight---lvl:%d\n", bl_lvl);
 	dsi = &panel->mipi_device;
 
 	//#ifdef CONFIG_ODM_WT_EDIT

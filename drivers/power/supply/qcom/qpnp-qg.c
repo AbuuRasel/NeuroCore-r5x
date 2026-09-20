@@ -1442,7 +1442,10 @@ static struct qg_irq_info qg_irqs[] = {
 	[QG_FIFO_UPDATE_DONE_IRQ] = {
 		.name		= "qg-fifo-done",
 		.handler	= qg_fifo_update_done_handler,
-		.wake		= true,
+		/* NeuroCore: fifo-done must not wake the SoC (was waking
+		 * every S2 interval and thrashing suspend). Backlog is
+		 * drained on resume; VBATT_LOW/EMPTY stay wakeable. */
+		.wake		= false,
 	},
 	[QG_GOOD_OCV_IRQ] = {
 		.name		= "qg-good-ocv",
