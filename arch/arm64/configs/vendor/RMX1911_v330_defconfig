@@ -535,6 +535,10 @@ CONFIG_PINCTRL_QCOM_SPMI_PMIC=y
 CONFIG_PINCTRL_TRINKET=y
 CONFIG_PM_WAKELOCKS=y
 CONFIG_PM_WAKELOCKS_LIMIT=0
+# NeuroCore: multitasking - PSI lets userspace lmkd react to memory
+# pressure precisely; KSM merges identical pages (zygote/app libs).
+CONFIG_PSI=y
+CONFIG_KSM=y
 CONFIG_PM_AUTOSLEEP=y
 CONFIG_POWER_RESET_QCOM=y
 CONFIG_POWER_RESET_SYSCON=y

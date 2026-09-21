@@ -173,8 +173,12 @@ int kswapd_threads_current = DEF_KSWAPD_THREADS_PER_NODE;
 
 /*
  * From 0 .. 100.  Higher means more swappy.
+ *
+ * NeuroCore: 100 (zram-first). Anonymous pages go to LZ4 zram instead
+ * of evicting file/code pages, so background apps survive longer.
+ * Still tunable via /proc/sys/vm/swappiness.
  */
-int vm_swappiness = 60;
+int vm_swappiness = 100;
 
 /*
  * The total number of pages which are beyond the high watermark within all
