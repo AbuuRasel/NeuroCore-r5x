@@ -72,7 +72,9 @@ static void neuro_apply_profile(int p)
 	case NEURO_BALANCED:
 	default:
 #ifdef CONFIG_CPU_BOOST
-		cpuboost_set_input_boost_ms(40);
+		/* 80ms covers scroll flings (FB/YT) without raising touch
+		 * floors (heat). Devfreq 200ms input boost covers the bus. */
+		cpuboost_set_input_boost_ms(80);
 		cpuboost_set_boost_freq(1363200, 1401600);
 		cpuboost_set_sched_boost_on_input(0);
 #endif
