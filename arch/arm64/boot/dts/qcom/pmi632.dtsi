@@ -304,14 +304,16 @@
 			qcom,temp_little_cool_vfloat_mv = <4435>;
 			qcom,temp_little_cool_fastchg_current_ma = <2000>;	/* 0.45C*0.95-64 ~ 0.45C*0.95 */
 
-			qcom,normal_bat_decidegc = <160>;	/*16C~44C*/
+			qcom,normal_bat_decidegc = <160>;	/*16C~45C*/
 			qcom,temp_normal_fastchg_current_ma = <2200>;		/*0.65C-64 ~ 0.65C*/
 			qcom,temp_normal_vfloat_mv = <4435>;
 
-			qcom,warm_bat_decidegc = <440>;		/*44C~53C*/ /*8pin Bat Vooc project need add 3 degree C*/
+			/* NeuroCore full-speed to 45C: warm zone starts at 45C,
+			 * derate softened (hot stop at 53C untouched). */
+			qcom,warm_bat_decidegc = <450>;		/*45C~53C*/ /*8pin Bat Vooc project need add 3 degree C*/
 			qcom,temp_warm_vfloat_mv = <4130>;
-			qcom,temp_warm_fastchg_current_ma = <1350>;	/* 0.3C*0.95-64 ~ 0.3C*0.95 */
-			qcom,temp_warm_fastchg_current_ma_led_on = <500>;
+			qcom,temp_warm_fastchg_current_ma = <1800>;
+			qcom,temp_warm_fastchg_current_ma_led_on = <1000>;
 		//#endif /* CONFIG_ODM_WT_EDIT */
 
 			qcom,hot_bat_decidegc = <530>;

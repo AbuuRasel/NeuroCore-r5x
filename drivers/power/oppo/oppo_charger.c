@@ -4476,6 +4476,7 @@ static void oppo_chg_battery_update_status(struct oppo_chg_chip *chip)
 /* Bin2.Zhang@ODM_WT.BSP.Charger.Basic.1941873, 20200405, Add for monitor skin/cpu temperature */
 /* Jie1.Huang@ODM_WT.BSP.Charger.Basic.1941873, 20191030, Add current limited according to battery tempreture */
 #define TEMP_CURRENT_2000_MA (2000000)
+#define TEMP_CURRENT_1800_MA (1800000)
 #define TEMP_CURRENT_1500_MA (1500000)
 #define TEMP_CURRENT_1200_MA (1200000)
 
@@ -4589,12 +4590,13 @@ void change_charge_current_according_battery_temp(struct oppo_chg_chip *chip)
         }
     }
     if (g_batt_temp_status == 38) {
-        if (chip->temperature >= 440)
-            vote(chg->usb_icl_votable, FB_BLANK_VOTER, true, min(lcd_on_chg_curr_proc, 500000));
+        /* NeuroCore: match 45C warm boundary; soften screen-on derates. */
+        if (chip->temperature >= 450)
+            vote(chg->usb_icl_votable, FB_BLANK_VOTER, true, min(lcd_on_chg_curr_proc, 800000));
         else
-            vote(chg->usb_icl_votable, FB_BLANK_VOTER, true, min(lcd_on_chg_curr_proc, TEMP_CURRENT_1200_MA));
+            vote(chg->usb_icl_votable, FB_BLANK_VOTER, true, min(lcd_on_chg_curr_proc, TEMP_CURRENT_1500_MA));
     } else if (g_batt_temp_status == 36)
-        vote(chg->usb_icl_votable, FB_BLANK_VOTER, true, min(lcd_on_chg_curr_proc, TEMP_CURRENT_1500_MA));
+        vote(chg->usb_icl_votable, FB_BLANK_VOTER, true, min(lcd_on_chg_curr_proc, TEMP_CURRENT_1800_MA));
     else if (g_batt_temp_status == 34)
         vote(chg->usb_icl_votable, FB_BLANK_VOTER, true, min(lcd_on_chg_curr_proc, TEMP_CURRENT_2000_MA));
     else
