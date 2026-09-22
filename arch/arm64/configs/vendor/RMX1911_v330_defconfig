@@ -1,7 +1,13 @@
 CONFIG_ANDROID=y
 CONFIG_ANDROID_BINDER_IPC=y
-# CONFIG_ANDROID_LOW_MEMORY_KILLER is not set (Nullifier parity:
-# kernel LMK dropped, pressure handled by userspace lmkd + reclaim)
+# NeuroCore: in-kernel LMK restored (Amri-proven on these ROMs) as a
+# lenient last resort alongside userspace lmkd. Stock thresholds kill
+# cached/empty processes only when free < 6/8/16/64MB, so background
+# apps survive; it also preempts brutal kernel OOM kills. Tunable via
+# /sys/module/lowmemorykiller/parameters/{adj,minfree,enable_lmk}.
+CONFIG_ANDROID_LOW_MEMORY_KILLER=y
+# Frontswap/cleancache backend for reclaim flexibility (Amri parity).
+CONFIG_CLEANCACHE=y
 CONFIG_ARCH_QCOM=y
 CONFIG_ARCH_TRINKET=y
 CONFIG_ARM64_CRYPTO=y
