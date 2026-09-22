@@ -253,8 +253,10 @@ static int ksm_max_page_sharing = 256;
 /* Number of pages ksmd should scan in one batch */
 static unsigned int ksm_thread_pages_to_scan = 100;
 
-/* Milliseconds ksmd should sleep between batches */
-static unsigned int ksm_thread_sleep_millisecs = 20;
+/* Milliseconds ksmd should sleep between batches.
+ * NeuroCore: 50 (gentler background scanning for battery life;
+ * still tunable via /sys/kernel/mm/ksm/sleep_millisecs). */
+static unsigned int ksm_thread_sleep_millisecs = 50;
 
 /* Checksum of an empty (zeroed) page */
 static unsigned int zero_checksum __read_mostly;
