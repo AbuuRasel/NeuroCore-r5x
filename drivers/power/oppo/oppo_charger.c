@@ -5095,8 +5095,9 @@ static bool oppo_chg_check_vbatt_is_full_by_sw(struct oppo_chg_chip *chip)
 /* NeuroCore charge limit: stop at chg_limit_stop %, resume at
  * chg_limit_resume %. Tunable:
  *   /sys/module/oppo_charger/parameters/chg_limit_stop (0 = disabled)
- *   /sys/module/oppo_charger/parameters/chg_limit_resume */
-static int chg_limit_stop = 90;
+ *   /sys/module/oppo_charger/parameters/chg_limit_resume.
+ * Default OFF (0): charge to full unless the user opts in. */
+static int chg_limit_stop = 0;
 static int chg_limit_resume = 87;
 module_param(chg_limit_stop, int, 0644);
 module_param(chg_limit_resume, int, 0644);
