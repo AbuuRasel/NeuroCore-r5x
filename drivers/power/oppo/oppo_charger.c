@@ -4431,11 +4431,32 @@ static void fg_update(struct oppo_chg_chip *chip)
 }
 static void battery_update(struct oppo_chg_chip *chip)
 {
+        /* NeuroCore: update_work must keep its 5s cadence (safety
+         * checks), but blind power_supply_changed() every cycle floods
+         * ueventd (overflow + drops + CPU wake every ~5s). Notify on
+         * real change + 60s heartbeat; healthd UI stays fresh. */
+        static int last_soc = -1, last_volt, last_temp, last_exist = -1;
+        static unsigned int hb;
+        bool changed;
+
         oppo_chg_update_ui_soc(chip);
 
         if (chip->fg_bcl_poll) {
                 fg_update(chip);
         }
+
+        changed = (chip->ui_soc != last_soc ||
+                   abs(chip->batt_volt - last_volt) > 20 ||
+                   abs(chip->temperature - last_temp) > 2 ||
+                   !!chip->charger_exist != last_exist ||
+                   ++hb >= 12);
+        if (!changed)
+                return;
+        hb = 0;
+        last_soc = chip->ui_soc;
+        last_volt = chip->batt_volt;
+        last_temp = chip->temperature;
+        last_exist = !!chip->charger_exist;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
         power_supply_changed(chip->batt_psy);
 #else

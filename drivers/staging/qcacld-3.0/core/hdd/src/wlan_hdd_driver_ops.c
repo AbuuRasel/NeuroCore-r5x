@@ -902,7 +902,7 @@ static int __wlan_hdd_bus_suspend_noirq(void)
 {
 	struct hdd_context *hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
 	void *hif_ctx;
-	int errno;
+	int errno, tries;
 	uint32_t pending_events;
 
 	hdd_debug("start bus_suspend_noirq");
@@ -927,20 +927,39 @@ static int __wlan_hdd_bus_suspend_noirq(void)
 	if (errno)
 		goto done;
 
-	errno = pmo_ucfg_psoc_is_target_wake_up_received(hdd_ctx->psoc);
-	if (errno == -EAGAIN) {
-		hdd_err("Firmware attempting wakeup, try again");
+	/*
+	 * NeuroCore: FW wakeup/critical events are usually momentary. Retry
+	 * briefly before refusing; an immediate -EAGAIN aborts the whole
+	 * system suspend and produced the suspend/resume thrash loop.
+	 * msleep is safe: noirq runs in process context with IRQs on.
+	 * Transient retries use hdd_debug (log spam fix); only the final
+	 * refusal is hdd_err.
+	 */
+	for (tries = 0; tries < 5; tries++) {
+		errno = pmo_ucfg_psoc_is_target_wake_up_received(hdd_ctx->psoc);
+		if (errno == -EAGAIN) {
+			hdd_debug("Firmware attempting wakeup, retry %d",
+				  tries);
+			msleep(20);
+			continue;
+		}
+		if (errno)
+			goto resume_hif_noirq;
+
+		pending_events = wma_critical_events_in_flight();
+		if (pending_events) {
+			hdd_debug("%d critical event(s) in flight, retry %d",
+				pending_events, tries);
+			errno = -EAGAIN;
+			msleep(20);
+			continue;
+		}
+		break;
+	}
+	if (errno) {
+		hdd_err("Firmware busy after retries, refusing suspend");
 		wlan_hdd_inc_suspend_stats(hdd_ctx,
 					   SUSPEND_FAIL_INITIAL_WAKEUP);
-	}
-	if (errno)
-		goto resume_hif_noirq;
-
-	pending_events = wma_critical_events_in_flight();
-	if (pending_events) {
-		hdd_err("%d critical event(s) in flight; try again",
-			pending_events);
-		errno = -EAGAIN;
 		goto resume_hif_noirq;
 	}
 
