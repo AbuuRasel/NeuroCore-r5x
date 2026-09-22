@@ -36,6 +36,8 @@ static struct sde_hw_kcal kcal_lut_data = {
 		.value		= SDE_HW_KCAL_INIT_ADJ,
 		.contrast	= SDE_HW_KCAL_INIT_ADJ,
 	},
+
+	.dimmer		= SDE_HW_KCAL_DIMMER_DEFAULT,
 };
 
 struct sde_hw_kcal *sde_hw_kcal_get(void)
@@ -65,6 +67,17 @@ void sde_hw_kcal_pcc_adjust(u32 *data, int plane)
 
 	data[idx] *= palette[plane];
 	data[idx] /= 256;
+
+	/*
+	 * NeuroCore extra-dim: sub-backlight-floor digital dimming for
+	 * over-bright (duplicate) panels at night. Orthogonal to the RGB
+	 * multipliers above, so no base bookkeeping is needed and it
+	 * survives modesets/reprogramming automatically. A nonzero dimmer
+	 * can never produce pure black (reboot restores 100 regardless).
+	 */
+	data[idx] = data[idx] * kcal_lut_data.dimmer / 100;
+	if (kcal_lut_data.dimmer && !data[idx])
+		data[idx] = 1;
 }
 
 #define create_one_rw_node(node)					\
@@ -139,6 +152,8 @@ define_one_kcal_node(kcal_hue, hsic.hue, 0, 1536);
 define_one_kcal_node(kcal_sat, hsic.saturation, 128, 383);
 define_one_kcal_node(kcal_val, hsic.value, 128, 383);
 define_one_kcal_node(kcal_cont, hsic.contrast, 128, 383);
+/* NeuroCore extra-dim: percent, 100 = off. See pcc_adjust above. */
+define_one_kcal_node(dimmer, dimmer, 0, 100);
 
 static int sde_hw_kcal_ctrl_probe(struct platform_device *pdev)
 {
@@ -151,6 +166,7 @@ static int sde_hw_kcal_ctrl_probe(struct platform_device *pdev)
 	ret |= device_create_file(&pdev->dev, &dev_attr_kcal_sat);
 	ret |= device_create_file(&pdev->dev, &dev_attr_kcal_val);
 	ret |= device_create_file(&pdev->dev, &dev_attr_kcal_cont);
+	ret |= device_create_file(&pdev->dev, &dev_attr_dimmer);
 	if (ret)
 		pr_err("Unable to create sysfs nodes\n");
 
@@ -160,6 +176,7 @@ static int sde_hw_kcal_ctrl_probe(struct platform_device *pdev)
 static int sde_hw_kcal_ctrl_remove(struct platform_device *pdev)
 {
 	device_remove_file(&pdev->dev, &dev_attr_kcal_cont);
+	device_remove_file(&pdev->dev, &dev_attr_dimmer);
 	device_remove_file(&pdev->dev, &dev_attr_kcal_val);
 	device_remove_file(&pdev->dev, &dev_attr_kcal_sat);
 	device_remove_file(&pdev->dev, &dev_attr_kcal_hue);

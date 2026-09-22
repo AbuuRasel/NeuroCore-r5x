@@ -21,6 +21,8 @@
 #define SDE_HW_KCAL_INIT_HUE		(0)
 #define SDE_HW_KCAL_INIT_ADJ		(255)
 
+#define SDE_HW_KCAL_DIMMER_DEFAULT	(100)
+
 struct sde_hw_kcal_pcc {
 	u32 red;
 	u32 green;
@@ -40,6 +42,9 @@ struct sde_hw_kcal {
 
 	u32 enabled:1;
 	u32 min_value;
+	/* NeuroCore extra-dim (percent, 100 = off). Applied in
+	 * sde_hw_kcal_pcc_adjust() on every programming. */
+	u32 dimmer;
 };
 
 #ifdef CONFIG_DRM_MSM_KCAL_CTRL
