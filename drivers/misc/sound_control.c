@@ -2,13 +2,26 @@
 /*
  * NeuroCore sound_control - Bolero TX/RX digital gains via ALSA kcontrols.
  *
- * Sysfs interface is in dB (-84..+40). The codec SX controls use raw
+ * Backend is in dB (-84..+40). The codec SX controls use raw
  * 0..124 (raw = dB + 84); conversion happens here, so tinymix values
  * (raw) and sysfs values (dB) stay consistent:
  *   dB = raw - 84  (e.g. raw 84 = 0dB, raw 124 = +40dB)
  *
+ * Sysfs (single UI to avoid confusion):
+ * /sys/class/misc/soundcontrol/{mic_boost,speaker_l_boost,
+ * speaker_r_boost} (0..20, FKM layout, sticky display).
+ * Diagnosis: /sys/kernel/sound_control/{status,version,controls,
+ * mic_gain_stock,speaker_pa_gain}.
  * mic_gain:     TX_DEC0 + TX_DEC1 Volume (in-call mics)
- * speaker_gain: RX_RX0 + RX_RX1 Digital Volume (speaker path)
+ * speaker_gain: RX_RX2 Digital Volume (speaker lives on RX2 on this
+ *               platform - Biofrost-proven on realme sm6125. RX_RX0/RX1
+ *               feed headphone/earpiece; WSA_RX writes land in the
+ *               register but are not audible on the speaker.)
+ * speaker_pa_gain: EAR SPKR PA Gain enum (0..7, 0 = stock). This is the
+ *               hardware PA loudness lever; the wsa-macro driver applies
+ *               it at stream start (POST_PMU), so it survives HAL/DAPM
+ *               rewrites unlike live digital writes. Takes effect on the
+ *               next track play / pause-resume, not mid-stream.
  * Boot default: mic = stock + 6dB (fixes low in-call mic), speaker = stock + 4dB.
  * Stock mic values readable via mic_gain_stock (always reversible).
  * v1.3: mic and speaker pairs resolve independently so a missing/renamed
@@ -26,6 +39,23 @@
  * v1.6: normalize update_bits change-flag (1) to success; only < 0 is
  * an error, otherwise manual stores falsely report failure and the auto
  * boost never marks itself done.
+ * v2.0: speaker pair moved to WSA_RX0/WSA_RX1 Digital Volume (smart
+ * amps drive the speaker; RX_RX0/RX1 writes return success but are not
+ * audible). find path takes controls_rwsem like the controls dump.
+ * v3.0: speaker moved to RX_RX2 Digital Volume (Biofrost-proven route
+ * on realme sm6125; WSA writes also inaudible). Both pair slots point
+ * at the single RX2 control - writes are idempotent.
+ * v3.1: new speaker_pa_gain node driving the EAR SPKR PA enum (0..7)
+ * through the driver's own put path. PA gain is applied by wsa-macro
+ * at stream start, so it persists across HAL/DAPM rewrites. Fully
+ * reversible: 0 restores exact stock behavior.
+ * v4.0: FKM (franco) compat misc device at
+ * /sys/class/misc/soundcontrol/{mic_boost,speaker_l_boost,
+ * speaker_r_boost} (0..20, sticky display values like franco's own
+ * driver). Writes drive the same backend; both UIs stay in sync.
+ * v4.1: single UI - the pair nodes (mic_gain/speaker_gain) are gone,
+ * FKM misc nodes are the only sliders. Boot auto boost now triggers
+ * on FKM access.
  */
 
 #include <linux/module.h>
@@ -36,6 +66,7 @@
 #include <linux/init.h>
 #include <linux/string.h>
 #include <linux/bitops.h>
+#include <linux/miscdevice.h>
 #include <sound/core.h>
 #include <sound/control.h>
 #include <sound/soc.h>
@@ -72,8 +103,14 @@ static bool sc_spk_boost_done;
 static int sc_spk_boost_err;
 
 static const char *sc_mic_names[2] = { "TX_DEC0 Volume", "TX_DEC1 Volume" };
-static const char *sc_spk_names[2] = { "RX_RX0 Digital Volume",
-				       "RX_RX1 Digital Volume" };
+static const char *sc_spk_names[2] = { "RX_RX2 Digital Volume",
+				       "RX_RX2 Digital Volume" };
+
+/* EAR SPKR PA enum (G_DEFAULT/G_0..G_6_DB); applied by wsa-macro at
+ * stream start, never live. 0 = stock. */
+static const char *sc_spk_pa_name = "EAR SPKR PA Gain";
+static struct snd_kcontrol *sc_spk_pa;
+static bool sc_spk_pa_ok;
 
 static struct snd_kcontrol *sc_find_kctl(const char *name)
 {
@@ -89,7 +126,9 @@ static struct snd_kcontrol *sc_find_kctl(const char *name)
 		memset(&id, 0, sizeof(id));
 		id.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 		strlcpy(id.name, name, sizeof(id.name));
+		down_read(&card->controls_rwsem);
 		kctl = snd_ctl_find_id(card, &id);
+		up_read(&card->controls_rwsem);
 		if (kctl)
 			return kctl;
 	}
@@ -355,109 +394,104 @@ static int sc_set_pair(struct snd_kcontrol **pair, int db)
 	return ret;
 }
 
-static ssize_t mic_gain_show(struct kobject *kobj, struct kobj_attribute *attr,
-			     char *buf)
+/* Locked mic/speaker setters shared by both sysfs frontends.
+ * Caller holds sc_lock. Returns 0 or error code. */
+static int sc_mic_set_db_locked(int db)
 {
-	int v0, v1, ret;
-
-	mutex_lock(&sc_lock);
-	if (!sc_resolve_mic()) {
-		mutex_unlock(&sc_lock);
-		return -ENODEV;
-	}
-	sc_maybe_snapshot_mic();
-	sc_maybe_boost_mic();
-	if (sc_kctl_get_db(sc_mic[0], &v0) ||
-	    sc_kctl_get_db(sc_mic[1], &v1)) {
-		pr_err_ratelimited("sound_control: mic read failed\n");
-		sc_invalidate_mic();
-		mutex_unlock(&sc_lock);
-		return -EIO;
-	}
-	ret = scnprintf(buf, PAGE_SIZE, "%d %d\n", v0, v1);
-	mutex_unlock(&sc_lock);
-	return ret;
-}
-
-static ssize_t mic_gain_store(struct kobject *kobj, struct kobj_attribute *attr,
-			      const char *buf, size_t count)
-{
-	long val;
 	int ret;
 
-	if (kstrtol(buf, 10, &val))
-		return -EINVAL;
-	if (val < SC_DB_MIN || val > SC_DB_MAX)
-		return -EINVAL;
-	mutex_lock(&sc_lock);
-	if (!sc_resolve_mic()) {
-		mutex_unlock(&sc_lock);
+	if (!sc_resolve_mic())
 		return -ENODEV;
-	}
 	sc_maybe_snapshot_mic();
-	ret = sc_set_pair(sc_mic, (int)val);
-	if (ret) {
-		pr_err_ratelimited("sound_control: mic write failed\n");
+	ret = sc_set_pair(sc_mic, db);
+	if (ret)
 		sc_invalidate_mic();
-	} else {
+	else {
 		/* Manual set overrides the auto boost. */
 		sc_boost_done = true;
 		sc_boost_err = 0;
 	}
-	mutex_unlock(&sc_lock);
-	return ret ? ret : (ssize_t)count;
-}
-
-static ssize_t speaker_gain_show(struct kobject *kobj,
-				 struct kobj_attribute *attr, char *buf)
-{
-	int v0, v1, ret;
-
-	mutex_lock(&sc_lock);
-	if (!sc_resolve_spk()) {
-		mutex_unlock(&sc_lock);
-		return -ENODEV;
-	}
-	sc_maybe_snapshot_spk();
-	sc_maybe_boost_spk();
-	if (sc_kctl_get_db(sc_spk[0], &v0) ||
-	    sc_kctl_get_db(sc_spk[1], &v1)) {
-		sc_invalidate_spk();
-		mutex_unlock(&sc_lock);
-		return -EIO;
-	}
-	ret = scnprintf(buf, PAGE_SIZE, "%d %d\n", v0, v1);
-	mutex_unlock(&sc_lock);
 	return ret;
 }
 
-static ssize_t speaker_gain_store(struct kobject *kobj,
-				  struct kobj_attribute *attr, const char *buf,
-				  size_t count)
+static int sc_spk_set_db_locked(int db)
 {
+	int ret;
+
+	if (!sc_resolve_spk())
+		return -ENODEV;
+	sc_maybe_snapshot_spk();
+	ret = sc_set_pair(sc_spk, db);
+	if (ret)
+		sc_invalidate_spk();
+	else {
+		/* Manual set overrides the auto boost. */
+		sc_spk_boost_done = true;
+		sc_spk_boost_err = 0;
+	}
+	return ret;
+}
+
+/* NOTE: the old mic_gain/speaker_gain pair nodes were removed (v4.1):
+ * FKM drives the misc frontend below, and two UIs for the same backend
+ * confused users. Backend + auto boost live on via the FKM paths. */
+
+/* Resolve the single PA enum control. Caller holds sc_lock. */
+static bool sc_resolve_spk_pa(void)
+{
+	if (sc_spk_pa_ok && sc_spk_pa)
+		return true;
+	if (!sc_spk_pa)
+		sc_spk_pa = sc_find_kctl(sc_spk_pa_name);
+	if (!sc_spk_pa)
+		return false;
+	sc_spk_pa_ok = true;
+	return true;
+}
+
+static ssize_t speaker_pa_gain_show(struct kobject *kobj,
+				    struct kobj_attribute *attr, char *buf)
+{
+	struct snd_ctl_elem_value uctl;
+	int ret;
+
+	mutex_lock(&sc_lock);
+	if (!sc_resolve_spk_pa()) {
+		mutex_unlock(&sc_lock);
+		return -ENODEV;
+	}
+	memset(&uctl, 0, sizeof(uctl));
+	ret = sc_spk_pa->get(sc_spk_pa, &uctl);
+	mutex_unlock(&sc_lock);
+	if (ret)
+		return -EIO;
+	return scnprintf(buf, PAGE_SIZE, "%d\n",
+			(int)uctl.value.integer.value[0]);
+}
+
+static ssize_t speaker_pa_gain_store(struct kobject *kobj,
+				     struct kobj_attribute *attr,
+				     const char *buf, size_t count)
+{
+	struct snd_ctl_elem_value uctl;
 	long val;
 	int ret;
 
 	if (kstrtol(buf, 10, &val))
 		return -EINVAL;
-	if (val < SC_DB_MIN || val > SC_DB_MAX)
+	if (val < 0 || val > 7)
 		return -EINVAL;
 	mutex_lock(&sc_lock);
-	if (!sc_resolve_spk()) {
+	if (!sc_resolve_spk_pa()) {
 		mutex_unlock(&sc_lock);
 		return -ENODEV;
 	}
-	sc_maybe_snapshot_spk();
-	ret = sc_set_pair(sc_spk, (int)val);
-	if (ret) {
-		sc_invalidate_spk();
-	} else {
-		/* Manual set overrides the auto boost. */
-		sc_spk_boost_done = true;
-		sc_spk_boost_err = 0;
-	}
+	memset(&uctl, 0, sizeof(uctl));
+	uctl.value.integer.value[0] = val;
+	ret = sc_spk_pa->put(sc_spk_pa, &uctl);
 	mutex_unlock(&sc_lock);
-	return ret ? ret : (ssize_t)count;
+	/* put returns 1 on change: still success, only < 0 is error. */
+	return ret < 0 ? ret : (ssize_t)count;
 }
 
 static ssize_t mic_gain_stock_show(struct kobject *kobj,
@@ -493,7 +527,7 @@ static ssize_t version_show(struct kobject *kobj, struct kobj_attribute *attr,
 			    char *buf)
 {
 	return scnprintf(buf, PAGE_SIZE,
-			 "NeuroCore sound_control v1.6 (dB, range -84..40)\n");
+			 "NeuroCore sound_control v4.1 (FKM single UI)\n");
 }
 
 /* Debug: dump every mixer control name on every card (capped). */
@@ -528,10 +562,9 @@ static ssize_t controls_show(struct kobject *kobj, struct kobj_attribute *attr,
 	return len;
 }
 
-static struct kobj_attribute mic_gain_attr =
-	__ATTR(mic_gain, 0644, mic_gain_show, mic_gain_store);
-static struct kobj_attribute speaker_gain_attr =
-	__ATTR(speaker_gain, 0644, speaker_gain_show, speaker_gain_store);
+static struct kobj_attribute speaker_pa_gain_attr =
+	__ATTR(speaker_pa_gain, 0644, speaker_pa_gain_show,
+		speaker_pa_gain_store);
 static struct kobj_attribute mic_gain_stock_attr =
 	__ATTR(mic_gain_stock, 0444, mic_gain_stock_show, NULL);
 /* Diagnosis: resolve state + stock + boost error without needing dmesg. */
@@ -542,11 +575,12 @@ static ssize_t status_show(struct kobject *kobj, struct kobj_attribute *attr,
 
 	mutex_lock(&sc_lock);
 	ret = scnprintf(buf, PAGE_SIZE,
-			"mic_ok=%d spk_ok=%d stock_done=%d boost_done=%d boost_err=%d stock=%d/%d spk_boost_done=%d spk_boost_err=%d spk_stock=%d/%d\n",
+			"mic_ok=%d spk_ok=%d stock_done=%d boost_done=%d boost_err=%d stock=%d/%d spk_boost_done=%d spk_boost_err=%d spk_stock=%d/%d spkpa_ok=%d\n",
 			sc_mic_ok, sc_spk_ok, sc_default_done, sc_boost_done,
 			sc_boost_err, sc_mic_stock_db[0], sc_mic_stock_db[1],
 			sc_spk_boost_done, sc_spk_boost_err,
-			sc_spk_stock_db[0], sc_spk_stock_db[1]);
+			sc_spk_stock_db[0], sc_spk_stock_db[1],
+			sc_spk_pa_ok);
 	mutex_unlock(&sc_lock);
 	return ret;
 }
@@ -559,8 +593,7 @@ static struct kobj_attribute status_attr =
 	__ATTR(status, 0444, status_show, NULL);
 
 static struct attribute *sc_attrs[] = {
-	&mic_gain_attr.attr,
-	&speaker_gain_attr.attr,
+	&speaker_pa_gain_attr.attr,
 	&mic_gain_stock_attr.attr,
 	&version_attr.attr,
 	&controls_attr.attr,
@@ -570,6 +603,144 @@ static struct attribute *sc_attrs[] = {
 
 static struct attribute_group sc_attr_group = {
 	.attrs = sc_attrs,
+};
+
+/*
+ * FKM (franco) compat frontend: /sys/class/misc/soundcontrol/
+ * {mic_boost,speaker_l_boost,speaker_r_boost}, 0..20 like franco's own
+ * driver. Show returns the last-set value (sticky) so sliders never
+ * jump back; stores drive the same backend above, keeping both UIs
+ * in sync.
+ */
+#define FKM_BOOST_MAX 20
+
+static int fkm_mic_boost;
+static int fkm_spk_l_boost;
+static int fkm_spk_r_boost;
+
+static ssize_t fkm_mic_boost_show(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	int ret;
+
+	/* Best-effort boot boost (same as the old pair-node show path). */
+	mutex_lock(&sc_lock);
+	if (sc_resolve_mic()) {
+		sc_maybe_snapshot_mic();
+		sc_maybe_boost_mic();
+	}
+	ret = scnprintf(buf, PAGE_SIZE, "%d\n", fkm_mic_boost);
+	mutex_unlock(&sc_lock);
+	return ret;
+}
+
+static ssize_t fkm_mic_boost_store(struct device *dev,
+				   struct device_attribute *attr,
+				   const char *buf, size_t size)
+{
+	unsigned long val;
+	int ret;
+
+	if (kstrtoul(buf, 0, &val))
+		return -EINVAL;
+	if (val > FKM_BOOST_MAX)
+		val = FKM_BOOST_MAX;
+	mutex_lock(&sc_lock);
+	ret = sc_mic_set_db_locked((int)val);
+	if (!ret)
+		fkm_mic_boost = (int)val;
+	mutex_unlock(&sc_lock);
+	return ret ? ret : (ssize_t)size;
+}
+
+static ssize_t fkm_spk_l_boost_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	int ret;
+
+	mutex_lock(&sc_lock);
+	if (sc_resolve_spk()) {
+		sc_maybe_snapshot_spk();
+		sc_maybe_boost_spk();
+	}
+	ret = scnprintf(buf, PAGE_SIZE, "%d\n", fkm_spk_l_boost);
+	mutex_unlock(&sc_lock);
+	return ret;
+}
+
+static ssize_t fkm_spk_l_boost_store(struct device *dev,
+				     struct device_attribute *attr,
+				     const char *buf, size_t size)
+{
+	unsigned long val;
+	int ret;
+
+	if (kstrtoul(buf, 0, &val))
+		return -EINVAL;
+	if (val > FKM_BOOST_MAX)
+		val = FKM_BOOST_MAX;
+	mutex_lock(&sc_lock);
+	ret = sc_spk_set_db_locked((int)val);
+	if (!ret)
+		fkm_spk_l_boost = (int)val;
+	mutex_unlock(&sc_lock);
+	return ret ? ret : (ssize_t)size;
+}
+
+static ssize_t fkm_spk_r_boost_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	int ret;
+
+	mutex_lock(&sc_lock);
+	if (sc_resolve_spk()) {
+		sc_maybe_snapshot_spk();
+		sc_maybe_boost_spk();
+	}
+	ret = scnprintf(buf, PAGE_SIZE, "%d\n", fkm_spk_r_boost);
+	mutex_unlock(&sc_lock);
+	return ret;
+}
+
+static ssize_t fkm_spk_r_boost_store(struct device *dev,
+				     struct device_attribute *attr,
+				     const char *buf, size_t size)
+{
+	unsigned long val;
+	int ret;
+
+	if (kstrtoul(buf, 0, &val))
+		return -EINVAL;
+	if (val > FKM_BOOST_MAX)
+		val = FKM_BOOST_MAX;
+	mutex_lock(&sc_lock);
+	ret = sc_spk_set_db_locked((int)val);
+	if (!ret)
+		fkm_spk_r_boost = (int)val;
+	mutex_unlock(&sc_lock);
+	return ret ? ret : (ssize_t)size;
+}
+
+static DEVICE_ATTR(mic_boost, 0644, fkm_mic_boost_show, fkm_mic_boost_store);
+static DEVICE_ATTR(speaker_l_boost, 0644, fkm_spk_l_boost_show,
+		   fkm_spk_l_boost_store);
+static DEVICE_ATTR(speaker_r_boost, 0644, fkm_spk_r_boost_show,
+		   fkm_spk_r_boost_store);
+
+static struct attribute *fkm_soundcontrol_attrs[] = {
+	&dev_attr_mic_boost.attr,
+	&dev_attr_speaker_l_boost.attr,
+	&dev_attr_speaker_r_boost.attr,
+	NULL,
+};
+
+static struct attribute_group fkm_soundcontrol_group = {
+	.attrs = fkm_soundcontrol_attrs,
+};
+
+static struct miscdevice fkm_soundcontrol_device = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "soundcontrol",
 };
 
 static int __init sound_control_init(void)
@@ -583,6 +754,17 @@ static int __init sound_control_init(void)
 	if (ret) {
 		kobject_put(sc_kobj);
 		return ret;
+	}
+	/* FKM frontend is best-effort: never fail sound init for it. */
+	if (misc_register(&fkm_soundcontrol_device)) {
+		pr_err("sound_control: fkm misc_register failed\n");
+	} else if (sysfs_create_group(
+			&fkm_soundcontrol_device.this_device->kobj,
+			&fkm_soundcontrol_group)) {
+		pr_err("sound_control: fkm sysfs group failed\n");
+		misc_deregister(&fkm_soundcontrol_device);
+	} else {
+		pr_info("sound_control: fkm frontend ready (/sys/class/misc/soundcontrol)\n");
 	}
 	pr_info("sound_control: ready (/sys/kernel/sound_control)\n");
 
