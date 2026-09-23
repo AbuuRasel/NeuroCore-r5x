@@ -29,7 +29,7 @@
 #endif
 #include "infra/symbol_resolver.h"
 
-#if defined(__x86_64__)
+#if defined(__x86_64__) && !defined(CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER)
 #include <asm/cpufeature.h>
 #include <linux/version.h>
 #ifndef X86_FEATURE_INDIRECT_SAFE
@@ -97,8 +97,8 @@ int __init kernelsu_init(void)
 #ifdef CONFIG_KSU_SUSFS
 	susfs_init();
 #endif
-#if defined(__x86_64__)
-    // If the kernel has the hardening patch, X86_FEATURE_INDIRECT_SAFE must be set 
+#if defined(__x86_64__) && !defined(CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER)
+    // If the kernel has the hardening patch, X86_FEATURE_INDIRECT_SAFE must be set
     if (!boot_cpu_has(X86_FEATURE_INDIRECT_SAFE)) {
         pr_alert("*************************************************************");
         pr_alert("**     NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE    **");
@@ -142,16 +142,13 @@ int __init kernelsu_init(void)
 	ksu_syscall_hook_init();
 
 	ksu_feature_init();
-
 	ksu_sulog_init();
-
 	ksu_adb_root_init();
-
 	ksu_lsm_hook_init();
-
 	ksu_selinux_hide_init();
 
 	ksu_supercalls_init();
+	ksu_app_profile_init();
 
 	if (ksu_late_loaded) {
 		pr_info("late load mode, skipping kprobe hooks\n");
