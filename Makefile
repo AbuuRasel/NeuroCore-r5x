@@ -659,12 +659,10 @@ export CFLAGS_GCOV CFLAGS_KCOV
 # Make toolchain changes before including arch/$(SRCARCH)/Makefile to ensure
 # ar/cc/ld-* macros return correct values.
 ifdef CONFIG_LTO_CLANG
-# use GNU gold with LLVMgold for LTO linking, and LD for vmlinux_link
-LDFINAL_vmlinux := $(LD)
-LD		:= $(LDGOLD)
-LDFLAGS		+= -plugin LLVMgold.so
-# use llvm-ar for building symbol tables from IR files, and llvm-dis instead
-# of objdump for processing symbol versions and exports
+# NeuroCore: Full LTO with LLD. The stock GNU gold + LLVMgold.so flow is
+# dead (removed from modern LLVM toolchains); ld.lld links -flto bitcode
+# natively, so LD stays as passed in (ld.lld). LLVM_AR stays for thin
+# archives of IR objects.
 LLVM_AR		:= llvm-ar
 LLVM_DIS	:= llvm-dis
 export LLVM_AR LLVM_DIS
@@ -848,6 +846,10 @@ lto-clang-flags	:= -flto -fvisibility=hidden
 # allow disabling only clang LTO where needed
 DISABLE_LTO_CLANG := -fno-lto -fvisibility=default
 export DISABLE_LTO_CLANG
+
+# NeuroCore: loadable modules stay non-LTO (plain objects keep modpost
+# and symbol tools working; no modules ship in the AnyKernel zip).
+KBUILD_CFLAGS_MODULE += $(DISABLE_LTO_CLANG)
 endif
 
 ifdef CONFIG_LTO
@@ -1240,9 +1242,9 @@ ifdef CONFIG_LTO_CLANG
   ifneq ($(call clang-ifversion, -ge, 0500, y), y)
 	@echo Cannot use CONFIG_LTO_CLANG: requires clang 5.0 or later >&2 && exit 1
   endif
-  ifneq ($(call gold-ifversion, -ge, 112000000, y), y)
-	@echo Cannot use CONFIG_LTO_CLANG: requires GNU gold 1.12 or later >&2 && exit 1
-  endif
+  # NeuroCore: LLD (not GNU gold) links the -flto bitcode natively.
+  # No version probe here: scripts/ld-version.sh only parses GNU ld
+  # output and would misfire on LLD (toolchain is pinned clang-r547379).
 endif
 # Make sure compiler supports LTO flags
 ifdef lto-flags
