@@ -44,23 +44,25 @@ PATCH_VBMETA_FLAG=auto;
 # file, printed first by update-binary before any checks)
 ui_print " ";
 ui_print "================================================";
-ui_print "Device : Realme 5 Series";
-ui_print "BY     : AbuuRaseL";
-ui_print "Tele.  : t.me/@AbuuRaseL";
-ui_print "KSU-N  : v3.3.0";
-ui_print "SUSFS  : v2.2.0";
-ui_print "Linux  : v4.14.357-openela";
+ui_print "NeuroCore Kernel";
+ui_print "BY      : Abu RaseL";
+ui_print "Channel : t.me/@NeuroCoreR5x";
+ui_print "KSU-N   : v3.4.0";
+ui_print "SUSFS   : v2.2.0";
+ui_print "Linux   : v4.14.357";
 ui_print "================================================";
 ui_print " ";
 
 # boot install
+ui_print "-> Dumping current boot image...";
 dump_boot;
 
+ui_print "-> Flashing NeuroCore kernel...";
 write_boot;
 
 ui_print " ";
 ui_print "NeuroCore installed successfully!";
-ui_print "Telegram: @AbuuRaseL";
+ui_print "Join : @NeuroCoreR5x";
 ui_print " ";
 
 # dtbo.img in zip root is flashed automatically by write_boot if present
