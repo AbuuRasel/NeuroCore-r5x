@@ -26,6 +26,14 @@
 #include "manager/manager_identity.h"
 #include "infra/su_mount_ns.h"
 
+/* NeuroCore dmesg-oracle hygiene: info logs exist only in DEBUG builds.
+ * Empty body (not no_printk): format strings never reach the compiler,
+ * so scanners cannot fingerprint them. pr_err stays for real failures. */
+#ifndef CONFIG_KSU_DEBUG
+#undef pr_info
+#define pr_info(...) do { } while (0)
+#endif
+
 #define FILE_MAGIC 0x7f4b5355 // ' KSU', u32
 #define FILE_FORMAT_VERSION 4 // u32
 

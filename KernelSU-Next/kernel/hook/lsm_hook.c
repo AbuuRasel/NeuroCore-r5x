@@ -14,6 +14,14 @@
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 #include "linux/static_call.h"
 #endif
+
+/* NeuroCore dmesg-oracle hygiene: info logs exist only in DEBUG builds.
+ * Empty body (not no_printk): format strings never reach the compiler,
+ * so scanners cannot fingerprint them. pr_err stays for real failures. */
+#ifndef CONFIG_KSU_DEBUG
+#undef pr_info
+#define pr_info(...) do { } while (0)
+#endif
 struct ksu_lsm_hook_entry {
     struct ksu_lsm_hook *hook;
 };

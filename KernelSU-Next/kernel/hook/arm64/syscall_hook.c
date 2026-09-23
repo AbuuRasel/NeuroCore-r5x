@@ -10,6 +10,14 @@
 #include "arch.h"
 #include "klog.h" // IWYU pragma: keep
 
+/* NeuroCore dmesg-oracle hygiene: info logs exist only in DEBUG builds.
+ * Empty body (not no_printk): format strings never reach the compiler,
+ * so scanners cannot fingerprint them. pr_err stays for real failures. */
+#ifndef CONFIG_KSU_DEBUG
+#undef pr_info
+#define pr_info(...) do { } while (0)
+#endif
+
 syscall_fn_t *ksu_syscall_table = NULL;
 int ksu_dispatcher_nr = -1;
 

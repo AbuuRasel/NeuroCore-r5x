@@ -21,6 +21,14 @@
 #include "hook/syscall_event_bridge.h"
 #include "feature/adb_root.h"
 
+/* NeuroCore dmesg-oracle hygiene: info logs exist only in DEBUG builds.
+ * Empty body (not no_printk): format strings never reach the compiler,
+ * so scanners cannot fingerprint them. pr_err stays for real failures. */
+#ifndef CONFIG_KSU_DEBUG
+#undef pr_info
+#define pr_info(...) do { } while (0)
+#endif
+
 static int ksu_handle_init_mark_tracker(const char __user **filename_user)
 {
     char path[64];

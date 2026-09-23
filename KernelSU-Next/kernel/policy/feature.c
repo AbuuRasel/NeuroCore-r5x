@@ -3,6 +3,14 @@
 
 #include <linux/mutex.h>
 
+/* NeuroCore dmesg-oracle hygiene: info logs exist only in DEBUG builds.
+ * Empty body (not no_printk): format strings never reach the compiler,
+ * so scanners cannot fingerprint them. pr_err stays for real failures. */
+#ifndef CONFIG_KSU_DEBUG
+#undef pr_info
+#define pr_info(...) do { } while (0)
+#endif
+
 static const struct ksu_feature_handler *feature_handlers[KSU_FEATURE_MAX];
 
 static DEFINE_MUTEX(feature_mutex);

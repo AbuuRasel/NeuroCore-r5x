@@ -572,6 +572,9 @@ CONFIG_PREEMPT_TRACER=n
 CONFIG_PREEMPT_VOLUNTARY=y
 CONFIG_PRINTK=y
 CONFIG_PRINTK_TIME=y
+# NeuroCore dmesg-oracle hygiene: unprivileged dmesg reads off (root
+# still works). Detectors can't scrape KSU/SUSFS traces via logd.
+CONFIG_SECURITY_DMESG_RESTRICT=y
 CONFIG_PRODUCT_REALME_TRINKET=y
 CONFIG_PROFILING=y
 CONFIG_PROVE_LOCKING=n

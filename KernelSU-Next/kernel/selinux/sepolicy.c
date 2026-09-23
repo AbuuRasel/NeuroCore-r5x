@@ -14,6 +14,14 @@
 #include "ss/symtab.h"
 #include "compat/kernel_compat.h" // Add check Huawei Device
 
+/* NeuroCore dmesg-oracle hygiene: info logs exist only in DEBUG builds.
+ * Empty body (not no_printk): format strings never reach the compiler,
+ * so scanners cannot fingerprint them. pr_err stays for real failures. */
+#ifndef CONFIG_KSU_DEBUG
+#undef pr_info
+#define pr_info(...) do { } while (0)
+#endif
+
 #define KSU_SUPPORT_ADD_TYPE
 
 //////////////////////////////////////////////////////

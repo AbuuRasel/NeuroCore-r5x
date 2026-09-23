@@ -17,6 +17,14 @@
 
 #include "klog.h" // IWYU pragma: keep
 
+/* NeuroCore dmesg-oracle hygiene: info logs exist only in DEBUG builds.
+ * Empty body (not no_printk): format strings never reach the compiler,
+ * so scanners cannot fingerprint them. pr_err stays for real failures. */
+#ifndef CONFIG_KSU_DEBUG
+#undef pr_info
+#define pr_info(...) do { } while (0)
+#endif
+
 DEFINE_STATIC_KEY_FALSE(ksu_adb_root);
 
 static long is_exec_adbd(struct pt_regs *regs)

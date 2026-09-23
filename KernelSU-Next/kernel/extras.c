@@ -7,6 +7,21 @@
 #include "klog.h"
 #include "runtime/ksud.h"
 #include "infra/seccomp_cache.h"
+#ifdef CONFIG_KPROBES
+#include <linux/kprobes.h>
+#include <linux/slab.h>
+#include "arch.h"
+#endif
+
+/* NeuroCore dmesg-oracle hygiene: info logs exist only in DEBUG builds.
+ * Empty body (not no_printk): format strings never reach the compiler,
+ * so scanners cannot fingerprint them. pr_err stays for real failures.
+ * NOTE: placed before ALL code (this file has code above the kprobe
+ * section), otherwise early pr_info calls would stay loud. */
+#ifndef CONFIG_KSU_DEBUG
+#undef pr_info
+#define pr_info(...) do { } while (0)
+#endif
 
 // sorry for the ifdef hell
 // but im too lazy to fragment this out.
@@ -97,9 +112,6 @@ int ksu_handle_slow_avc_audit(u32 *tsid)
 }
 
 #ifdef CONFIG_KPROBES
-#include <linux/kprobes.h>
-#include <linux/slab.h>
-#include "arch.h"
 static struct kprobe *slow_avc_audit_kp;
 //	.symbol_name = "slow_avc_audit",
 //	.pre_handler = slow_avc_audit_pre_handler,

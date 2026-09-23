@@ -7,6 +7,14 @@
 #include "sulog/event.h"
 #include "sulog/fd.h"
 
+/* NeuroCore dmesg-oracle hygiene: info logs exist only in DEBUG builds.
+ * Empty body (not no_printk): format strings never reach the compiler,
+ * so scanners cannot fingerprint them. pr_err stays for real failures. */
+#ifndef CONFIG_KSU_DEBUG
+#undef pr_info
+#define pr_info(...) do { } while (0)
+#endif
+
 static bool ksu_sulog_enabled __read_mostly = false;
 
 static int sulog_feature_get(u64 *value)
