@@ -277,10 +277,11 @@ static int ksm_nr_node_ids = 1;
 #define KSM_RUN_MERGE	1
 #define KSM_RUN_UNMERGE	2
 #define KSM_RUN_OFFLINE	4
-/* NeuroCore: start ksmd at boot (flash-and-use multitasking).
- * Merges identical pages (zygote/app libs) on 3/4GB devices.
- * Still fully controllable via /sys/kernel/mm/ksm/run. */
-static unsigned long ksm_run = KSM_RUN_MERGE;
+/* NeuroCore: ksmd stays parked by default (battery-first; KSM's
+ * continuous scanning costs steady CPU on a phone). Enable any time via
+ * /sys/kernel/mm/ksm/run. Was auto-start, reverted: retention is
+ * already carried by LMK+PSI+MGLRU+ZRAM. */
+static unsigned long ksm_run = KSM_RUN_STOP;
 static void wait_while_offlining(void);
 
 static DECLARE_WAIT_QUEUE_HEAD(ksm_thread_wait);

@@ -73,7 +73,7 @@ static void neuro_apply_profile(int p)
 	default:
 #ifdef CONFIG_CPU_BOOST
 		/* 60ms: scroll smoothness kept, sustained-touch heat cut
-		 * vs 80ms (social scrolling pins floors otherwise).
+		 * (social scrolling pins floors otherwise).
 		 * Devfreq 200ms input boost covers the bus. */
 		cpuboost_set_input_boost_ms(60);
 		cpuboost_set_boost_freq(1363200, 1401600);
@@ -82,7 +82,10 @@ static void neuro_apply_profile(int p)
 #ifdef CONFIG_ADRENO_IDLER
 		adreno_idler_set_active(1);
 #endif
-		update_battery_saver(false);
+		/* Battery saver ON even in balanced (flash-and-use battery
+		 * backup): suppresses sched/devfreq boost peaks while touch
+		 * floors keep UI smooth. Performance profile turns it off. */
+		update_battery_saver(true);
 		p = NEURO_BALANCED;
 		break;
 	}

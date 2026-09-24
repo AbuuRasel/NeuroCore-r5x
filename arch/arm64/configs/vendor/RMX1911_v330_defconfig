@@ -548,6 +548,9 @@ CONFIG_PM_WAKELOCKS_LIMIT=0
 CONFIG_PSI=y
 CONFIG_KSM=y
 CONFIG_PM_AUTOSLEEP=y
+# NeuroCore: skip emergency sync on suspend entry (journaled fs safe).
+# Faster suspend = less energy per sleep cycle.
+CONFIG_SUSPEND_SKIP_SYNC=y
 CONFIG_POWER_RESET_QCOM=y
 CONFIG_POWER_RESET_SYSCON=y
 CONFIG_POWER_RESET_XGENE=y

@@ -22,13 +22,14 @@
 
 #include "adreno_idler.h"
 
-/* NeuroCore: less aggressive than upstream so the GPU stays ready
- * through scroll pauses (FB-first-fling smoothness). Still clamps on
- * true idle. Tunable at runtime via module params. */
+/* Upstream defaults: idle the GPU down promptly on true idle.
+ * (A less-aggressive tune was tried for scroll smoothness but reverted
+ * for stock thermal/power behavior; tune at runtime via module params
+ * if needed.) */
 static int adreno_idler_active = 1;
-static int adreno_idler_downdifferential = 40;
-static int adreno_idler_idlewait = 24;
-static int adreno_idler_idleworkload = 4000;
+static int adreno_idler_downdifferential = 50;
+static int adreno_idler_idlewait = 12;
+static int adreno_idler_idleworkload = 6000;
 static unsigned int adreno_idler_idlecount;
 
 module_param_named(adreno_idler_active, adreno_idler_active, int, 0664);
