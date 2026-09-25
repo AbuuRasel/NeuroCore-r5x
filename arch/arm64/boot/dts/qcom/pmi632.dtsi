@@ -302,7 +302,7 @@
 
 			qcom,little_cool_bat_decidegc = <120>;	/*12C~16C*/
 			qcom,temp_little_cool_vfloat_mv = <4435>;
-			qcom,temp_little_cool_fastchg_current_ma = <2000>;	/* 0.45C*0.95-64 ~ 0.45C*0.95 */
+			qcom,temp_little_cool_fastchg_current_ma = <2200>;	/* NeuroCore balanced: match normal zone */
 
 			qcom,normal_bat_decidegc = <160>;	/*16C~45C*/
 			qcom,temp_normal_fastchg_current_ma = <2200>;		/*0.65C-64 ~ 0.65C*/
@@ -312,8 +312,8 @@
 			 * derate softened (hot stop at 53C untouched). */
 			qcom,warm_bat_decidegc = <450>;		/*45C~53C*/ /*8pin Bat Vooc project need add 3 degree C*/
 			qcom,temp_warm_vfloat_mv = <4130>;
-			qcom,temp_warm_fastchg_current_ma = <1800>;
-			qcom,temp_warm_fastchg_current_ma_led_on = <1000>;
+			qcom,temp_warm_fastchg_current_ma = <2000>;	/* NeuroCore balanced: was 1800 */
+			qcom,temp_warm_fastchg_current_ma_led_on = <1500>;	/* NeuroCore balanced: was 1000 */
 		//#endif /* CONFIG_ODM_WT_EDIT */
 
 			qcom,hot_bat_decidegc = <530>;
