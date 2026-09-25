@@ -36,7 +36,7 @@ static struct work_struct input_boost_work;
 
 static bool input_boost_enabled;
 
-static unsigned int input_boost_ms = 40;
+static unsigned int input_boost_ms = 30;
 module_param(input_boost_ms, uint, 0644);
 
 static unsigned int sched_boost_on_input;
@@ -330,7 +330,7 @@ static int cpu_boost_init(void)
 		 * scrolling (runtime-tunable via
 		 * /sys/module/cpu_boost/parameters/input_boost_freq).
 		 * Matches defconfig masks: cpu0-3 Silver, cpu4-7 Gold. */
-		s->input_boost_freq = cpu < 4 ? 1363200 : 1401600;
+		s->input_boost_freq = cpu < 4 ? 1056000 : 1228800;
 	}
 	input_boost_enabled = true;
 	cpufreq_register_notifier(&boost_adjust_nb, CPUFREQ_POLICY_NOTIFIER);
