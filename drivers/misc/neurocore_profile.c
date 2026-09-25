@@ -72,11 +72,11 @@ static void neuro_apply_profile(int p)
 	case NEURO_BALANCED:
 	default:
 #ifdef CONFIG_CPU_BOOST
-		/* 60ms: scroll smoothness kept, sustained-touch heat cut
-		 * (social scrolling pins floors otherwise).
-		 * Devfreq 200ms input boost covers the bus. */
-		cpuboost_set_input_boost_ms(60);
-		cpuboost_set_boost_freq(1363200, 1401600);
+		/* SOT tune: lower touch floors (1056/1228 MHz) + shorter
+		 * boost window (40ms). Scroll stays smooth via devfreq
+		 * input boost; sustained-touch power drops. */
+		cpuboost_set_input_boost_ms(40);
+		cpuboost_set_boost_freq(1056000, 1228800);
 		cpuboost_set_sched_boost_on_input(0);
 #endif
 #ifdef CONFIG_ADRENO_IDLER

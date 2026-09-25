@@ -28,7 +28,7 @@
  * if needed.) */
 static int adreno_idler_active = 1;
 static int adreno_idler_downdifferential = 50;
-static int adreno_idler_idlewait = 12;
+static int adreno_idler_idlewait = 10;
 static int adreno_idler_idleworkload = 6000;
 static unsigned int adreno_idler_idlecount;
 
