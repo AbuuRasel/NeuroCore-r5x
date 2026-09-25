@@ -3721,6 +3721,10 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 
 	prior_fackets = tp->fackets_out;
 	rs.prior_in_flight = tcp_packets_in_flight(tp);
+	/* BBRv2: tx_in_flight at window start (pre-cleanup), closest to
+	 * the reference per-skb in_flight which needs skb_cb space we
+	 * do not have on this tree (u64 mstamps fill the 24B budget). */
+	rs.tx_in_flight = rs.prior_in_flight;
 	tcp_rate_check_app_limited(sk);
 
 	/* ts_recent update must be made after we are sure that the packet
@@ -3796,6 +3800,10 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 
 	delivered = tp->delivered - delivered;	/* freshly ACKed or SACKed */
 	lost = tp->lost - lost;			/* freshly marked lost */
+	if (flag & FLAG_ECE)
+		tp->delivered_ce += delivered;
+	rs.is_ack_delayed = !!(flag & FLAG_ACK_MAYBE_DELAYED);
+	rs.is_ece = !!(flag & FLAG_ECE);
 	tcp_rate_gen(sk, delivered, lost, is_sack_reneg, sack_state.rate);
 	tcp_cong_control(sk, ack, delivered, flag, sack_state.rate);
 	tcp_xmit_recovery(sk, rexmit);
