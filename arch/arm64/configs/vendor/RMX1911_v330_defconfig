@@ -208,10 +208,6 @@ CONFIG_HWSPINLOCK=y
 CONFIG_HWSPINLOCK_QCOM=y
 CONFIG_HW_RANDOM=y
 CONFIG_HW_RANDOM_MSM_LEGACY=y
-CONFIG_LRNG=y
-CONFIG_LRNG_JENT=y
-# CONFIG_LRNG_TRNG_SUPPORT is not set
-CONFIG_LRNG_HEALTH_TESTS=y
 # NeuroCore battery: HZ 100 (fewer timer IRQs; hrtimers unaffected,
 # matches Amri/Biofrost reference trees).
 CONFIG_HZ=100
