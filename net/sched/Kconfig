@@ -267,6 +267,35 @@ config NET_SCH_PIE
 
 	  If unsure, say N.
 
+config NET_SCH_CAKE
+	tristate "Common Applications Kept Enhanced (CAKE)"
+	depends on NET_SCHED
+	help
+	  Say Y here if you want to use the Common Applications Kept Enhanced
+	  (CAKE) queue management algorithm.
+	  Backported from dtaht/sch_cake@aeff7a3e (2020-01-10), the same
+	  pin OpenWrt used for 4.14 (kmod-sched-cake-oot).
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called sch_cake.
+
+	  If unsure, say N.
+
+config NET_SCH_FQ_PIE
+	depends on NET_SCH_PIE
+	tristate "Flow Queue Proportional Integral controller Enhanced (FQ-PIE)"
+	help
+	  Say Y here if you want to use the Flow Queue Proportional Integral
+	  controller Enhanced (FQ-PIE) packet scheduling algorithm.
+	  Ported from upstream v5.6 ("net: sched: add Flow Queue PIE packet
+	  scheduler", RFC 8033); PIE core carried statically since this
+	  tree keeps PIE private to sch_pie.c.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called sch_fq_pie.
+
+	  If unsure, say N.
+
 config NET_SCH_INGRESS
 	tristate "Ingress/classifier-action Qdisc"
 	depends on NET_CLS_ACT
